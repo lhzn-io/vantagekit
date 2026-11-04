@@ -239,6 +239,18 @@ export class Vantage extends EventTarget {
       }
     }
     moved = c.update(step) || moved;
+    // A zero-size element (hidden or collapsed) makes camera-controls divide by zero, and one
+    // NaN poisons the camera for good. Return to the last finite view instead.
+    const p = this.camera.position;
+    if (Number.isFinite(p.x + p.y + p.z)) {
+      if (moved || !this._lastGood) {
+        this._lastGood = [p.toArray(), this.getTarget().toArray()];
+      }
+    } else if (this._lastGood) {
+      c.setLookAt(...this._lastGood[0], ...this._lastGood[1], false);
+      c.update(0);
+      this._emit('recover');
+    }
     if (moved) {
       this._linkDirty = true;
       this._emit('move');
@@ -409,9 +421,11 @@ export class Vantage extends EventTarget {
   writeLink() {
     if (!this._link || !this._linkReady) return false;
     if (typeof location === 'undefined' || typeof history === 'undefined') return false;
+    const view = this.view();
+    if (!Object.values(view).every(Number.isFinite)) return false;
     const url = new URL(location.href);
     for (const k of ['cv', 'cam', 'cf']) url.searchParams.delete(k);
-    const enc = encodeCam(this.view(), { frame: this.frame ? 'geo' : 'local' });
+    const enc = encodeCam(view, { frame: this.frame ? 'geo' : 'local' });
     for (const [k, v] of Object.entries(enc)) url.searchParams.set(k, v);
     if (this._link.app && this._link.app.write) this._link.app.write(url.searchParams);
     const href = url.toString().replace(/%2C/g, ',');

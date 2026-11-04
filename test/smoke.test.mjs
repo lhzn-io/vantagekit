@@ -121,6 +121,19 @@ test('held keys are dropped when the page loses focus without a keyup', () => {
   v.dispose();
 });
 
+test('a NaN camera returns to the last finite view', () => {
+  const v = make();
+  v.setLookAt([0, 50, 100], [0, 10, 0]);
+  v.update(0.016);
+  v.controls._spherical.radius = NaN;
+  v.controls._sphericalEnd.radius = NaN;
+  v.update(0.016);
+  const e = v.getPosition();
+  close(e.y, 50, 1e-6); close(e.z, 100, 1e-6);
+  close(v.getTarget().y, 10, 1e-6);
+  v.dispose();
+});
+
 test('fitBox matches the DEM viewer framing', () => {
   const v = make();
   const box = new THREE.Box3(new THREE.Vector3(-50, -2, -30), new THREE.Vector3(50, 8, 30));

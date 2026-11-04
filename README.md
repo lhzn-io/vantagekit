@@ -83,7 +83,8 @@ Pin exact versions of three.js, camera-controls and vantagekit.
 | `setEnabled(on)`, `setOrigin(origin)`, `dispose()` | Lifecycle |
 
 Events: `move`, `rest`, `input` (`mouse`, `keyboard` or `gamepad`), `gamepad` (connected or
-disconnected), `link` (URL rewritten).
+disconnected), `link` (URL rewritten), `recover` (a non-finite camera was reset to the last good
+view).
 
 ## View links
 
