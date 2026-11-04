@@ -1,0 +1,29 @@
+{
+  "name": "vantagekit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared navigation for Earth-system model domain viewers: orbit, keyboard and gamepad input in real units, framing, and camera links, on camera-controls.",
+  "type": "module",
+  "main": "vantagekit.js",
+  "exports": {
+    ".": "./vantagekit.js",
+    "./three": "./vantagekit-three.js"
+  },
+  "files": [
+    "vantagekit.js",
+    "vantagekit-three.js"
+  ],
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "author": "Long Horizon Observatory",
+  "license": "MIT",
+  "peerDependencies": {
+    "camera-controls": ">=3.1.2 <4",
+    "three": ">=0.170.0"
+  },
+  "devDependencies": {
+    "camera-controls": "3.1.2",
+    "three": "0.170.0"
+  }
+}

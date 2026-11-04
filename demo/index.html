@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vantagekit demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0a12; color: #d8dce6; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #panel { position: absolute; top: 12px; left: 12px; width: 260px; padding: 10px 12px; background: rgba(16, 18, 28, 0.88); border: 1px solid #2a2f40; border-radius: 6px; }
+  #panel h1 { font-size: 14px; margin: 0 0 6px; }
+  #panel label { display: block; margin: 6px 0 2px; color: #9aa3b8; }
+  #panel select, #panel input[type=range] { width: 100%; }
+  #keys { margin: 8px 0 0; padding: 0; list-style: none; color: #9aa3b8; font-size: 12px; }
+  #keys b { color: #d8dce6; font-weight: 600; }
+  #status { margin-top: 8px; font: 12px ui-monospace, monospace; color: #8fc1ff; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h1>vantagekit demo</h1>
+  <div>Synthetic height field, 20 km across.</div>
+  <label for="mouse">Mouse</label>
+  <select id="mouse">
+    <option value="rotate-left">Left rotates, right pans</option>
+    <option value="pan-left">Left pans, right rotates</option>
+  </select>
+  <label for="scale">Metres per scene unit</label>
+  <select id="scale">
+    <option value="100">100</option>
+    <option value="1">1</option>
+  </select>
+  <label for="exag">Vertical exaggeration <span id="exag-val">5x</span></label>
+  <input id="exag" type="range" min="1" max="40" value="5">
+  <label><input id="link" type="checkbox" checked> Keep the camera in the URL</label>
+  <ul id="keys"></ul>
+  <div id="status"></div>
+</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import CameraControls from 'camera-controls';
+import { createVantage } from '../vantagekit-three.js';
+
+const ORIGIN = { lon: -70.5, lat: 42.5 };   // an arbitrary open-ocean point
+const SPAN_M = 20000;
+const N = 256;
+const params = new URLSearchParams(location.search);
+const sel = (id) => document.getElementById(id);
+sel('mouse').value = params.get('mouse') || 'rotate-left';
+sel('scale').value = params.get('mpu') || '100';
+sel('exag').value = params.get('ex') || '5';
+
+const canvas = sel('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.add(new THREE.AmbientLight(0x404050, 0.8));
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+sun.position.set(1, 2, 1);
+scene.add(sun);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 1e6);
+
+// Heights in metres: a shelf sloping to 400 m with ridges and a seamount.
+function heightAt(xm, ym) {
+  const u = xm / SPAN_M, w = ym / SPAN_M;
+  const shelf = -400 * (u + 0.5);
+  const ridges = 25 * Math.sin(u * 40) * Math.cos(w * 23);
+  const mount = 300 * Math.exp(-((u - 0.15) ** 2 + (w + 0.1) ** 2) / 0.004);
+  return shelf + ridges + mount;
+}
+
+let mesh = null;
+let builtMpu = null;
+let builtExag = null;
+function build() {
+  const mpu = +sel('scale').value, exag = +sel('exag').value;
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  const g = new THREE.PlaneGeometry(SPAN_M / mpu, SPAN_M / mpu, N - 1, N - 1);
+  g.rotateX(-Math.PI / 2);
+  const pos = g.attributes.position;
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const h = heightAt(pos.getX(i) * mpu, -pos.getZ(i) * mpu);
+    pos.setY(i, (h * exag) / mpu);
+    const t = Math.min(1, Math.max(0, (h + 450) / 800));
+    col[i * 3] = 0.1 + 0.5 * t; col[i * 3 + 1] = 0.25 + 0.5 * t; col[i * 3 + 2] = 0.55 + 0.2 * t;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(mesh);
+  builtMpu = mpu; builtExag = exag;
+  sel('exag-val').textContent = exag + 'x';
+}
+
+let nav = null;
+function makeNav() {
+  if (nav) nav.dispose();
+  const mpu = +sel('scale').value;
+  nav = createVantage({
+    THREE, CameraControls, camera, dom: canvas,
+    origin: ORIGIN, metresPerUnit: mpu,
+    exaggeration: () => builtExag,
+    mouse: sel('mouse').value,
+    link: sel('link').checked && {
+      app: {
+        write(p) {
+          p.set('mouse', sel('mouse').value);
+          p.set('mpu', sel('scale').value);
+          p.set('ex', sel('exag').value);
+        },
+      },
+    },
+  });
+  nav.addEventListener('input', (e) => { lastInput = e.detail.kind; });
+  nav.addEventListener('gamepad', (e) => { padName = e.detail.connected ? e.detail.id : 'none'; });
+  sel('keys').innerHTML = nav.bindings
+    .map((b) => `<li><b>${[...b.keys.map((k) => k.replace(/^Key|Left$|Right$/g, '')), b.pad].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</b>: ${b.label}</li>`)
+    .join('');
+}
+
+let lastInput = 'none', padName = 'none';
+function frame() {
+  build();
+  makeNav();
+  nav.fitBox(new THREE.Box3().setFromObject(mesh));
+  nav.saveHome();
+  nav.readLink();
+  nav.applyLink();
+}
+
+sel('mouse').addEventListener('change', () => { const v = nav.view(); makeNav(); nav.setView(v); nav.applyLink(); nav.writeLink(); });
+sel('scale').addEventListener('change', () => { const v = nav.view(); build(); makeNav(); nav.setView(v); nav.saveHome(); nav.applyLink(); nav.writeLink(); });
+sel('exag').addEventListener('input', () => {
+  const prev = builtExag;
+  const t = nav.getTarget();
+  build();
+  nav.rescaleVertical(prev, builtExag, t.y);
+  nav.writeLink();
+});
+sel('link').addEventListener('change', () => { const v = nav.view(); makeNav(); nav.setView(v); nav.applyLink(); });
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+frame();
+resize();
+const clock = new THREE.Clock();
+let frames = 0;
+renderer.setAnimationLoop(() => {
+  const moved = nav.update(clock.getDelta());
+  renderer.render(scene, camera);
+  if (moved || frames++ % 30 === 0) {
+    const v = nav.view(), i = nav.viewInfo();
+    sel('status').textContent =
+      `range ${Math.round(i.rangeMetres)} m, ${i.metresPerPixelAtTarget.toFixed(1)} m/px\n` +
+      `bearing ${v.bearing.toFixed(0)}, pitch ${v.pitch.toFixed(0)}\n` +
+      `input ${lastInput}, pad ${padName}`;
+  }
+});
+window.vantage = () => nav;   // for debugging in the console
+</script>
+</body>
+</html>
