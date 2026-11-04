@@ -1,12 +1,17 @@
 # vantagekit
 
+![The vantagekit demo: an invented 20 km coastline at 5x vertical exaggeration, with hills and a river valley on land, a translucent sea surface, a shelf cut by a submarine canyon, and an offshore island](docs/demo.png)
+
+*The demo page, an invented coastline built in the page with no data service. The side panel lists the bindings and the live range, metres per pixel, bearing and pitch.*
+
 Shared navigation for viewers of Earth-system model domains: terrain, seabed, ocean and atmosphere
 scenes in the browser. It sits on top of
 [camera-controls](https://github.com/yomotsu/camera-controls) and adds what each viewer otherwise
 writes for itself:
 
-- **Orbit navigation without the wheel stall.** Zooming in past the minimum distance pushes the
-  orbit point ahead (`infinityDolly`) toward the cursor (`dollyToCursor`).
+- **Zoom that keeps going.** camera-controls' `infinityDolly` and `dollyToCursor` are on by
+  default: zooming in past the minimum distance moves the orbit point ahead toward the cursor, so
+  scrolling carries you into a scene instead of slowing as you near the orbit point.
 - **Keyboard and gamepad input in real units.** WASD, Q/E and the arrow keys move at a speed in
   metres per second, independent of frame rate. An Xbox-style controller (standard mapping) moves,
   looks around and resets the view.
