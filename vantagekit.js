@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2026 Long Horizon Observatory. MIT licence.
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const LINK_VERSION = 1;
 
 /** Metres per degree of latitude used by the local frame (matches common viewer practice). */
@@ -178,13 +178,22 @@ export const DEFAULT_BINDINGS = Object.freeze([
   { intent: 'back', keys: ['KeyS', 'ArrowDown'], pad: 'left stick down', label: 'Move back' },
   { intent: 'left', keys: ['KeyA', 'ArrowLeft'], pad: 'left stick left', label: 'Move left' },
   { intent: 'right', keys: ['KeyD', 'ArrowRight'], pad: 'left stick right', label: 'Move right' },
-  { intent: 'down', keys: ['KeyQ'], pad: 'left trigger', label: 'Move down' },
-  { intent: 'up', keys: ['KeyE'], pad: 'right trigger', label: 'Move up' },
-  { intent: 'look', keys: [], pad: 'right stick', label: 'Look around the orbit point' },
-  { intent: 'fast', keys: ['ShiftLeft', 'ShiftRight'], pad: 'RB steps up', label: 'Faster (x4)' },
+  { intent: 'down', keys: ['KeyQ', 'KeyC'], pad: 'left trigger', label: 'Move down' },
+  { intent: 'up', keys: ['KeyE', 'Space'], pad: 'right trigger', label: 'Move up' },
+  { intent: 'look', keys: [], pad: 'right stick', label: 'Look around (orbit: around the orbit point; fly: from where you are)' },
+  { intent: 'fast', keys: ['ShiftLeft', 'ShiftRight'], pad: 'stick click, RB steps up', label: 'Faster (x4)' },
   { intent: 'slow', keys: ['ControlLeft', 'ControlRight'], pad: 'LB steps down', label: 'Slower (x0.25)' },
+  { intent: 'mode', keys: ['KeyF'], pad: 'Y', label: 'Switch between orbit and fly (Esc leaves fly)' },
   { intent: 'home', keys: ['Home'], pad: 'A', label: 'Reset view' },
 ]);
+
+/**
+ * Stick response curve: keeps the sign, raises the magnitude to `power` (1 is linear; 2 makes
+ * small deflections finer while full deflection stays 1).
+ */
+export function applyCurve(v, power = 2) {
+  return Math.sign(v) * Math.abs(v) ** power;
+}
 
 /** Map of KeyboardEvent.code to intent, from a bindings table. */
 export function keyMap(bindings = DEFAULT_BINDINGS) {
@@ -218,7 +227,7 @@ export function radialDeadzone(x, y, dz = 0.15) {
 /**
  * Intents from a standard-mapping gamepad.
  * @param {Gamepad} gp
- * @returns {{x:number,y:number,z:number,yaw:number,pitch:number,stepUp:boolean,stepDown:boolean,home:boolean,active:boolean}}
+ * @returns {{x:number,y:number,z:number,yaw:number,pitch:number,stepUp:boolean,stepDown:boolean,home:boolean,mode:boolean,sprint:boolean,active:boolean}}
  */
 export function padIntents(gp, dz = 0.15) {
   const ax = gp.axes || [];
@@ -232,7 +241,8 @@ export function padIntents(gp, dz = 0.15) {
   const out = {
     x: lx, y: -ly, z: rt - lt, yaw: rx, pitch: ry,
     stepUp: pressed(5), stepDown: pressed(4), home: pressed(0),
+    mode: pressed(3), sprint: pressed(10) || pressed(11),
   };
-  out.active = !!(lx || ly || rx || ry || lt || rt || out.stepUp || out.stepDown || out.home);
+  out.active = !!(lx || ly || rx || ry || lt || rt || out.stepUp || out.stepDown || out.home || out.mode || out.sprint);
   return out;
 }

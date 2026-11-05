@@ -14,7 +14,10 @@
   #panel select, #panel input[type=range] { width: 100%; }
   #keys { margin: 8px 0 0; padding: 0; list-style: none; color: #9aa3b8; font-size: 12px; }
   #keys b { color: #d8dce6; font-weight: 600; }
-  #status { margin-top: 8px; font: 12px ui-monospace, monospace; color: #8fc1ff; white-space: pre-wrap; }
+  #panel button { margin-top: 8px; width: 100%; padding: 5px; background: #1d3b52; color: #d8dce6; border: 1px solid #2f5d7f; border-radius: 4px; font: inherit; cursor: pointer; }
+  #panel button:disabled { opacity: 0.45; cursor: default; }
+  .hint { margin-top: 4px; color: #9aa3b8; font-size: 12px; }
+  #status {margin-top: 8px; font: 12px ui-monospace, monospace; color: #8fc1ff; white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -22,7 +25,18 @@
 <div id="panel">
   <h1>vantagekit demo</h1>
   <div>An invented coastline, 20 km across: hills, a river valley, a shelf with a canyon, and an island.</div>
-  <label for="mouse">Mouse</label>
+  <label for="modes">Modes offered (a page setting)</label>
+  <select id="modes">
+    <option value="orbit,fly">Orbit and fly</option>
+    <option value="orbit">Orbit only</option>
+    <option value="fly">Fly only</option>
+  </select>
+  <button id="fly" type="button">Fly (F)</button>
+  <div id="fly-hint" class="hint"></div>
+  <label for="sens">Fly mouse look <span id="sens-val"></span></label>
+  <input id="sens" type="range" min="0.03" max="0.4" step="0.01">
+  <label><input id="invert" type="checkbox"> Invert Y</label>
+  <label for="mouse">Orbit mouse</label>
   <select id="mouse">
     <option value="rotate-left">Left rotates, right pans</option>
     <option value="pan-left">Left pans, right rotates</option>
@@ -60,6 +74,8 @@ const sel = (id) => document.getElementById(id);
 sel('mouse').value = params.get('mouse') || 'rotate-left';
 sel('scale').value = params.get('mpu') || '100';
 sel('exag').value = params.get('ex') || '5';
+sel('modes').value = params.get('modes') || 'orbit,fly';
+let startMode = params.get('mode') || null;   // ?mode=fly starts in fly mode
 
 const canvas = sel('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -166,14 +182,22 @@ let nav = null;
 function makeNav() {
   if (nav) nav.dispose();
   const mpu = +sel('scale').value;
+  const modes = sel('modes').value.split(',');
+  const mode = modes.includes(startMode) ? startMode : modes[0];
   nav = createVantage({
     THREE, CameraControls, camera, dom: canvas,
     origin: ORIGIN, metresPerUnit: mpu,
     exaggeration: () => builtExag,
+    modes, mode,
+    settingsKey: 'vantagekit-demo.fly',
+    // Fly speed scales with height above the land, the seabed or, over water, the sea surface.
+    surfaceAt: (x, z) => (Math.max(0, heightAt(x * mpu, -z * mpu)) * builtExag) / mpu,
     mouse: sel('mouse').value,
     link: sel('link').checked && {
       app: {
         write(p) {
+          p.set('modes', sel('modes').value);
+          p.set('mode', nav.mode);
           p.set('mouse', sel('mouse').value);
           p.set('mpu', sel('scale').value);
           p.set('ex', sel('exag').value);
@@ -183,24 +207,56 @@ function makeNav() {
   });
   nav.addEventListener('input', (e) => { lastInput = e.detail.kind; });
   nav.addEventListener('gamepad', (e) => { padName = e.detail.connected ? e.detail.id : 'none'; });
+  nav.addEventListener('modechange', (e) => { startMode = e.detail.mode; showMode(); });
   sel('keys').innerHTML = nav.bindings
     .map((b) => `<li><b>${[...b.keys.map(keyName), b.pad].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</b>: ${b.label}</li>`)
     .join('');
+  sel('sens').value = nav.fly.sensitivity;
+  sel('invert').checked = nav.fly.invertY;
+  showMode();
+}
+
+function showMode() {
+  const fly = nav.mode === 'fly', both = nav.modes.length > 1;
+  sel('fly').textContent = fly ? 'Orbit (F or Esc)' : 'Fly (F)';
+  sel('fly').disabled = !both;
+  sel('fly-hint').textContent = fly
+    ? 'Click the scene to capture the mouse (or drag to look). The wheel sets the speed.'
+    : (both ? '' : 'This page offers orbit only.');
+  sel('sens-val').textContent = `${(+sel('sens').value).toFixed(2)} deg/px`;
 }
 
 let lastInput = 'none', padName = 'none';
+// Home: from offshore in the south-west, looking north-east toward the coast.
+function frameHome() {
+  nav.fitBox(new THREE.Box3().setFromObject(mesh), { bearingDeg: 60, elevationDeg: 35, factor: 0.8 });
+  nav.saveHome();
+}
 function frame() {
   build();
   makeNav();
-  // From offshore in the south-west, looking north-east toward the coast.
-  nav.fitBox(new THREE.Box3().setFromObject(mesh), { bearingDeg: 60, elevationDeg: 35, factor: 0.8 });
-  nav.saveHome();
+  frameHome();
   nav.readLink();
   nav.applyLink();
 }
+// Rebuild the controller for a changed page setting, keeping the current view.
+function remake({ rebuild = false } = {}) {
+  const v = nav.view();
+  startMode = nav.mode;
+  if (rebuild) build();
+  makeNav();
+  frameHome();
+  nav.setView(v);
+  nav.applyLink();
+  nav.writeLink();
+}
 
-sel('mouse').addEventListener('change', () => { const v = nav.view(); makeNav(); nav.setView(v); nav.applyLink(); nav.writeLink(); });
-sel('scale').addEventListener('change', () => { const v = nav.view(); build(); makeNav(); nav.setView(v); nav.saveHome(); nav.applyLink(); nav.writeLink(); });
+sel('fly').addEventListener('click', () => nav.setMode(nav.mode === 'fly' ? 'orbit' : 'fly'));
+sel('sens').addEventListener('input', () => { nav.setFlySettings({ sensitivity: +sel('sens').value }); showMode(); });
+sel('invert').addEventListener('change', () => nav.setFlySettings({ invertY: sel('invert').checked }));
+sel('modes').addEventListener('change', () => remake());
+sel('mouse').addEventListener('change', () => remake());
+sel('scale').addEventListener('change', () => remake({ rebuild: true }));
 sel('exag').addEventListener('input', () => {
   const prev = builtExag;
   const t = nav.getTarget();
@@ -209,7 +265,7 @@ sel('exag').addEventListener('input', () => {
   nav.writeLink();
 });
 sel('sea').addEventListener('change', () => { sea.visible = sel('sea').checked; });
-sel('link').addEventListener('change', () => { const v = nav.view(); makeNav(); nav.setView(v); nav.applyLink(); });
+sel('link').addEventListener('change', () => remake());
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -231,6 +287,7 @@ renderer.setAnimationLoop(() => {
     sel('status').textContent =
       `range ${Math.round(i.rangeMetres)} m, ${i.metresPerPixelAtTarget.toFixed(1)} m/px\n` +
       `bearing ${v.bearing.toFixed(0)}, pitch ${v.pitch.toFixed(0)}\n` +
+      `${nav.mode}${nav.mode === 'fly' ? `, speed x${i.flySpeedMultiplier.toFixed(2)}` : ''}\n` +
       `input ${lastInput}, pad ${padName}`;
   }
 });

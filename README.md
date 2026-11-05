@@ -4,6 +4,9 @@
 
 *The demo page, an invented coastline built in the page with no data service. The side panel lists the bindings and the live range, metres per pixel, bearing and pitch.*
 
+**[Open the live demo](https://lhzn-io.github.io/vantagekit/demo/)** (desktop: mouse, keyboard or a
+gamepad; touch input is planned). `?mode=fly` starts in fly mode.
+
 Shared navigation for viewers of Earth-system model domains: terrain, seabed, ocean and atmosphere
 scenes in the browser. It sits on top of
 [camera-controls](https://github.com/yomotsu/camera-controls) and adds what each viewer otherwise
@@ -12,9 +15,12 @@ writes for itself:
 - **Zoom that keeps going.** camera-controls' `infinityDolly` and `dollyToCursor` are on by
   default: zooming in past the minimum distance moves the orbit point ahead toward the cursor, so
   scrolling carries you into a scene instead of slowing as you near the orbit point.
-- **Keyboard and gamepad input in real units.** WASD, Q/E and the arrow keys move at a speed in
-  metres per second, independent of frame rate. An Xbox-style controller (standard mapping) moves,
-  looks around and resets the view.
+- **Orbit and fly modes, chosen by the page.** Orbit circles a point in the scene, map style. Fly
+  is a game-style camera: mouse look (pointer lock, or drag), WASD where you look, the wheel sets
+  the speed. A page offers both (F switches, Esc leaves fly) or fixes one.
+- **Keyboard and gamepad input in real units.** WASD, Q/E (or Space/C) and the arrow keys move at a
+  speed in metres per second, independent of frame rate. An Xbox-style controller (standard
+  mapping) moves, looks around, switches mode and resets the view.
 - **Scale and exaggeration aware.** Speeds and links are expressed in metres, whatever the scene
   unit and the vertical exaggeration.
 - **Framing helpers.** `fitBox`, `placeView` (bearing, elevation, distance), `saveHome` and `home`,
@@ -34,7 +40,7 @@ copy of three.js however it loads it.
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.1.0/vantagekit-three.js"
+    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.2.0/vantagekit-three.js"
   }
 }
 </script>
@@ -48,7 +54,9 @@ const nav = createVantage({
   origin: { lon: -70.5, lat: 42.5 },   // scene origin, for geographic links
   metresPerUnit: 100,                  // one scene unit is 100 m
   exaggeration: () => settings.exag,   // vertical exaggeration, read when needed
-  mouse: 'pan-left',                   // or 'rotate-left'
+  mouse: 'pan-left',                   // orbit mouse: or 'rotate-left'
+  modes: ['orbit', 'fly'],             // or ['orbit'] or ['fly']; default both
+  mode: 'orbit',                       // starting mode; default the first of modes
   link: true,                          // keep the camera in the URL
 });
 
@@ -67,6 +75,31 @@ renderer.setAnimationLoop(() => {
 
 Pin exact versions of three.js, camera-controls and vantagekit.
 
+## Orbit and fly
+
+The page decides which modes exist. `modes: ['orbit', 'fly']` (the default) offers both: F or the
+pad's Y button switches, Esc leaves fly mode, and leaving puts the orbit point straight ahead at
+the same distance, so the view does not jump. `modes: ['fly']` gives a fly-only viewer and
+`modes: ['orbit']` an orbit-only one; with one mode the switch does nothing and is left out of
+`bindings`. `setMode('fly')` switches in code.
+
+| | Orbit | Fly |
+|---|---|---|
+| Mouse | drag to rotate and pan; the wheel zooms toward the cursor | look around (pointer lock after a click, or drag); the wheel sets the speed |
+| WASD, arrows | move the orbit point along the ground | move where you look, pitch included |
+| Q/E, C/Space | down and up | down and up |
+| Shift, Ctrl | x4, x0.25 | x4, x0.25 |
+| Left stick | move | move, with a response curve |
+| Right stick | rotate around the orbit point | look from where you are |
+| Triggers, LB/RB, stick click, A | down and up, speed steps, x4, home | the same |
+
+Fly speed per second is a fraction (`speed.rangeFactor`, 0.5) of your height above the surface
+when the page supplies `surfaceAt(x, z)` (scene units in and out), so low passes are slow and high
+ones fast; without it, of the distance to the orbit point when fly mode began. Movement eases in
+and out over about 0.15 s. The fly settings `sensitivity` (degrees per pixel), `invertY` and
+`curve` can be changed with `setFlySettings()` and remembered per browser with `settingsKey`.
+Flying through terrain is allowed.
+
 ## API
 
 `createVantage(options)` returns a controller (an `EventTarget`):
@@ -78,7 +111,10 @@ Pin exact versions of three.js, camera-controls and vantagekit.
 | `getTarget(out)`, `getPosition(out)`, `setLookAt(eye, target, animate)` | Camera access |
 | `placeView({ target, bearingDeg, elevationDeg, distance, animate })` | Place the eye around a target |
 | `fitBox(box3, { bearingDeg, elevationDeg, factor })` | Frame a bounding box |
-| `saveHome()`, `home(animate)` | Remember and return to a view (Home key, pad A) |
+| `saveHome()`, `home(animate)` | Remember and return to a view (Home key, pad A), in either mode |
+| `setMode(mode)`, `mode`, `modes` | Switch between the page's modes; the current and offered modes |
+| `stepFlySpeed(steps)`, `turn(rightDeg, upDeg)`, `setFlySettings(partial)` | Fly speed, look and settings from your own controls |
+| `setSurface(fn)` | Set the surface height lookup used for fly speed |
 | `rescaleVertical(prev, next, anchorY)` | Keep a point steady when the exaggeration changes |
 | `view()`, `setView(view, animate)` | Renderer-neutral view state |
 | `readLink()`, `applyLink()`, `writeLink()` | Camera links in the URL |
@@ -88,8 +124,8 @@ Pin exact versions of three.js, camera-controls and vantagekit.
 | `setEnabled(on)`, `setOrigin(origin)`, `dispose()` | Lifecycle |
 
 Events: `move`, `rest`, `input` (`mouse`, `keyboard` or `gamepad`), `gamepad` (connected or
-disconnected), `link` (URL rewritten), `recover` (a non-finite camera was reset to the last good
-view).
+disconnected), `link` (URL rewritten), `modechange`, `speed` (fly speed multiplier changed),
+`recover` (a non-finite camera was reset to the last good view).
 
 ## View links
 

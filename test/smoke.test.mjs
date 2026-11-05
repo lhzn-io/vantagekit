@@ -10,7 +10,7 @@ globalThis.DOMRect ??= class DOMRect {
 import CameraControls from 'camera-controls';
 import {
   createVantage, encodeCam, decodeCam, localFrame, eyeOffset, orbitFromOffset,
-  shortestDeltaDeg, radialDeadzone, padIntents, VERSION,
+  shortestDeltaDeg, radialDeadzone, padIntents, applyCurve, VERSION,
 } from '../vantagekit-three.js';
 
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`);
@@ -24,7 +24,7 @@ function make(opts = {}) {
 }
 
 test('module loads without a GPU or DOM', () => {
-  assert.equal(VERSION, '0.1.0');
+  assert.equal(VERSION, '0.2.0');
   const v = make();
   assert.ok(v.controls);
   v.dispose();
@@ -205,4 +205,110 @@ test('viewInfo reports metres per pixel at the target', () => {
   close(info.rangeMetres, 1000, 1e-6);
   close(info.metresPerPixelAtTarget, 2 * 1000 * Math.tan((55 * Math.PI / 180) / 2), 1e-6);
   v.dispose();
+});
+
+// ---- fly mode and the choice of modes ------------------------------------------------------
+
+const run = (v, seconds, dt = 0.02) => { for (let t = 0; t < seconds - 1e-9; t += dt) v.update(dt); };
+
+test('fly mode moves where you look, in m/s, with a short ease in', () => {
+  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 } });
+  assert.equal(v.mode, 'fly');
+  v.setLookAt([0, 50, 0], [0, 50, -100]);   // level, looking north
+  v.press('forward');
+  run(v, 2);
+  const p = v.getPosition();
+  const moved = -p.z;
+  assert.ok(moved > 19 && moved <= 20, `moved ${moved}`);
+  close(p.y, 50, 1e-9);
+  v.release('forward');
+  run(v, 1);
+  const stop = v.getPosition().z;
+  run(v, 1);
+  close(v.getPosition().z, stop, 1e-6);    // eased to a stop and stays
+  v.dispose();
+});
+
+test('fly forward follows the pitch of the view', () => {
+  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 } });
+  v.setLookAt([0, 100, 0], [0, 100 - Math.tan(30 * Math.PI / 180) * 100, -100]);   // 30 degrees down
+  v.press('forward');
+  run(v, 3);
+  const p = v.getPosition();
+  close((100 - p.y) / -p.z, Math.tan(30 * Math.PI / 180), 1e-6);
+  v.dispose();
+});
+
+test('orbit to fly and back keeps the eye and the orbit point', () => {
+  const v = make({ metresPerUnit: 100 });
+  v.setLookAt([3, 40, 25], [1, -2, -6]);
+  v.update(0);
+  v.setMode('fly');
+  v.update(0.016);
+  close(v.getPosition().distanceTo(new THREE.Vector3(3, 40, 25)), 0, 1e-6);
+  close(v.getTarget().distanceTo(new THREE.Vector3(1, -2, -6)), 0, 1e-6);
+  v.setMode('orbit');
+  v.update(0.016);
+  close(v.getPosition().distanceTo(new THREE.Vector3(3, 40, 25)), 0, 1e-4);
+  close(v.getTarget().distanceTo(new THREE.Vector3(1, -2, -6)), 0, 1e-4);
+  v.dispose();
+});
+
+test('the page chooses the modes: fly only, orbit only, validation', () => {
+  const flyOnly = make({ modes: ['fly'] });
+  assert.equal(flyOnly.mode, 'fly');
+  assert.throws(() => flyOnly.setMode('orbit'), /not offered/);
+  assert.ok(!flyOnly.bindings.some((b) => b.intent === 'mode'));
+  flyOnly.dispose();
+  const orbitOnly = make({ modes: ['orbit'] });
+  assert.throws(() => orbitOnly.setMode('fly'), /not offered/);
+  orbitOnly.dispose();
+  const both = make();
+  assert.equal(both.mode, 'orbit');
+  assert.ok(both.bindings.some((b) => b.intent === 'mode'));
+  both.dispose();
+  assert.throws(() => make({ modes: ['orbit'], mode: 'fly' }), /not in modes/);
+  assert.throws(() => make({ modes: ['walk'] }), /modes must be/);
+});
+
+test('fly speed follows height above the surface, and the wheel steps it', () => {
+  const v = make({ mode: 'fly', metresPerUnit: 1, surfaceAt: () => 0 });
+  v.setLookAt([0, 100, 0], [0, 100, -10]);   // 100 m up, level
+  v.press('forward');
+  run(v, 1);
+  close(-v._fly.vel.z, 50, 0.5);             // 0.5 x 100 m once eased in
+  assert.equal(v.stepFlySpeed(2), 1.5625);
+  v.dispose();
+});
+
+test('fly views round trip through a geographic link', () => {
+  const a = make({ mode: 'fly', origin: { lon: -70.5, lat: 42.5 }, metresPerUnit: 100, exaggeration: 5 });
+  a.setLookAt([12, 4, 33], [3, -1, -4]);
+  a.update(0.016);
+  const decoded = decodeCam(new URLSearchParams(encodeCam(a.view())));
+  const b = make({ origin: { lon: -70.5, lat: 42.5 }, metresPerUnit: 100, exaggeration: 5 });
+  b.setView(decoded.view);
+  b.update(0);
+  close(b.getPosition().distanceTo(new THREE.Vector3(12, 4, 33)), 0, 1e-2);
+  close(b.getTarget().distanceTo(new THREE.Vector3(3, -1, -4)), 0, 1e-2);
+  a.dispose(); b.dispose();
+});
+
+test('home works in both modes', () => {
+  const v = make({ metresPerUnit: 1 });
+  v.setLookAt([0, 50, 50], [0, 0, 0]);
+  v.update(0);
+  v.saveHome();
+  v.setMode('fly');
+  v.setLookAt([40, 5, 40], [0, 5, 0]);
+  v.home(false);
+  v.update(0.016);
+  close(v.getPosition().distanceTo(new THREE.Vector3(0, 50, 50)), 0, 1e-6);
+  v.dispose();
+});
+
+test('stick response curve', () => {
+  assert.equal(applyCurve(0.5, 2), 0.25);
+  assert.equal(applyCurve(-0.5, 2), -0.25);
+  assert.equal(applyCurve(1, 3), 1);
 });

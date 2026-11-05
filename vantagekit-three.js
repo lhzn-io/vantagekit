@@ -1,5 +1,5 @@
-// vantagekit three.js adapter: orbit navigation on yomotsu/camera-controls with keyboard and
-// gamepad input in real units, framing helpers, and camera links in the page URL.
+// vantagekit three.js adapter: orbit and fly navigation, with camera-controls for orbit, keyboard
+// and gamepad input in real units, framing helpers, and camera links in the page URL.
 //
 // three.js and camera-controls are passed in, never imported, so a page keeps a single copy of
 // three.js whatever way it loads it (importmap, dynamic import, or a vendored file).
@@ -7,13 +7,23 @@
 // Copyright (c) 2026 Long Horizon Observatory. MIT licence.
 
 import {
-  DEFAULT_BINDINGS, keyMap, keyIntents, padIntents, localFrame,
+  DEFAULT_BINDINGS, keyMap, keyIntents, padIntents, applyCurve, localFrame,
   eyeOffset, orbitFromOffset, encodeCam, decodeCam,
 } from './vantagekit.js';
 
 export * from './vantagekit.js';
 
 const D2R = Math.PI / 180;
+const MODES = ['orbit', 'fly'];
+const FLY_DEFAULTS = {
+  sensitivity: 0.12,   // degrees of turn per pixel of mouse movement
+  invertY: false,
+  curve: 2,            // stick response curve power (1 is linear)
+  padLookDeg: 120,     // right-stick turn rate at full deflection, degrees per second
+  accelTime: 0.15,     // seconds to reach about 95 % of the target speed
+  pointerLock: true,   // capture the pointer for mouse look; drag to look without it
+};
+const SETTING_KEYS = ['sensitivity', 'invertY', 'curve'];
 
 function isEditable(t) {
   return !!t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName || ''));
@@ -33,18 +43,23 @@ const clamp1 = (v) => Math.max(-1, Math.min(1, v));
  * @param {Function} o.CameraControls the camera-controls class
  * @param {object} o.camera a THREE.PerspectiveCamera
  * @param {HTMLElement} [o.dom] element that receives mouse and touch input (omit in tests)
+ * @param {Array<'orbit'|'fly'>} [o.modes=['orbit','fly']] modes the page offers; one entry fixes it
+ * @param {'orbit'|'fly'} [o.mode] starting mode (default: the first of `modes`)
+ * @param {object} [o.fly] fly mode settings: sensitivity, invertY, curve, padLookDeg, accelTime, pointerLock
+ * @param {string} [o.settingsKey] localStorage key to remember the viewer's fly settings
+ * @param {Function} [o.surfaceAt] (x, z) -> surface height in scene units, or null; scales fly speed by height above it
  * @param {{lon:number,lat:number}} [o.origin] scene origin, enables geographic links
  * @param {string} [o.axes] axis convention, 'x-east,y-up,-z-north'
  * @param {number} [o.metresPerUnit=1] metres per scene unit
  * @param {number|Function} [o.exaggeration=1] vertical exaggeration, or a getter read when needed
- * @param {'rotate-left'|'pan-left'} [o.mouse='rotate-left'] mouse button preset
- * @param {'screen'|'ground'} [o.pan='screen'] pan in the screen plane or along the ground
+ * @param {'rotate-left'|'pan-left'} [o.mouse='rotate-left'] orbit mouse button preset
+ * @param {'screen'|'ground'} [o.pan='screen'] orbit pan in the screen plane or along the ground
  * @param {number} [o.minDistance] scene units; the wheel pushes the orbit point ahead past it
  * @param {number} [o.maxDistance=Infinity]
  * @param {number} [o.maxPolarAngle=0.85*PI]
  * @param {boolean} [o.keys=true]
  * @param {boolean} [o.gamepad=true]
- * @param {{mps?:number, rangeFactor?:number, minMps?:number}} [o.speed] fixed m/s, or a fraction of the view range per second
+ * @param {{mps?:number, rangeFactor?:number, minMps?:number}} [o.speed] fixed m/s, or a fraction of the view range (orbit) or height (fly) per second
  * @param {boolean|{app?:{read?:Function,write?:Function}}} [o.link=false] keep the camera in the URL
  */
 export function createVantage(o) {
@@ -64,13 +79,22 @@ export class Vantage extends EventTarget {
     this._axes = o.axes;
     this._exag = typeof o.exaggeration === 'function' ? o.exaggeration : () => o.exaggeration ?? 1;
     this.frame = o.origin ? localFrame({ origin: o.origin, metresPerUnit: this.metresPerUnit, axes: o.axes }) : null;
-    this.bindings = o.bindings ?? DEFAULT_BINDINGS;
-    this._keyMap = keyMap(this.bindings);
+    this._bindings = o.bindings ?? DEFAULT_BINDINGS;
+    this._keyMap = keyMap(this._bindings);
     this.speed = { mps: null, rangeFactor: 0.5, minMps: 0.5, ...(o.speed || {}) };
     this.lookRateDeg = o.lookRateDeg ?? 90;
     this.deadzone = o.deadzone ?? 0.15;
     this.maxDt = o.maxDt ?? 0.1;
-    this.mode = 'orbit';
+    this.surfaceAt = o.surfaceAt || null;
+
+    this.modes = (o.modes ?? MODES).filter((m, i, a) => a.indexOf(m) === i);
+    if (!this.modes.length || !this.modes.every((m) => MODES.includes(m))) {
+      throw new Error(`vantagekit: modes must be a non-empty list of ${MODES.join(', ')}`);
+    }
+    const start = o.mode ?? this.modes[0];
+    if (!this.modes.includes(start)) throw new Error(`vantagekit: mode '${start}' is not in modes`);
+    this._settingsKey = o.settingsKey || null;
+    this.fly = { ...FLY_DEFAULTS, ...(o.fly || {}), ...this._loadSettings() };
 
     const c = new CameraControls(camera, this.dom || undefined);
     this.controls = c;
@@ -92,6 +116,7 @@ export class Vantage extends EventTarget {
     c.maxPolarAngle = o.maxPolarAngle ?? Math.PI * 0.85;
     c.smoothTime = o.smoothTime ?? 0.25;
 
+    this.mode = 'orbit';
     this._enabled = true;
     this._held = new Set();
     this._input = null;
@@ -102,9 +127,17 @@ export class Vantage extends EventTarget {
     this._pending = null;
     this._linkReady = false;
     this._link = o.link ? { app: (o.link === true ? null : o.link.app) || null } : null;
+    this._linkDirty = false;
+    this._home = null;
+    // Fly state: eye position, bearing and elevation of the look direction (degrees), velocity,
+    // a reference distance (scene units) for speed and for the point ahead, and the wheel's
+    // speed multiplier.
+    this._fly = {
+      pos: new THREE.Vector3(), bearing: 0, elev: 0, vel: new THREE.Vector3(),
+      ref: 1, speedMul: 1, locked: false, dragging: false, turned: false,
+    };
 
     this._onControlStart = () => this._setInput('mouse');
-    this._linkDirty = false;
     this._onRest = () => this._emit('rest');
     c.addEventListener('controlstart', this._onControlStart);
     c.addEventListener('rest', this._onRest);
@@ -114,17 +147,25 @@ export class Vantage extends EventTarget {
       this._on(window, 'keydown', (e) => this._keyDown(e));
       this._on(window, 'keyup', (e) => this._keyUp(e));
       this._on(window, 'blur', () => this._held.clear());
-      if (typeof document !== 'undefined') {
-        this._on(document, 'visibilitychange', () => this._held.clear());
-      }
     }
+    if (typeof document !== 'undefined') {
+      this._on(document, 'visibilitychange', () => this._held.clear());
+      this._on(document, 'pointerlockchange', () => this._lockChanged());
+      this._on(document, 'mousemove', (e) => this._mouseLook(e));
+    }
+    if (this.dom) {
+      this._on(this.dom, 'pointerdown', (e) => this._flyPointerDown(e));
+      this._on(window, 'pointerup', () => { this._fly.dragging = false; });
+      this._on(this.dom, 'wheel', (e) => this._flyWheel(e), { passive: false });
+    }
+    if (start === 'fly') this.setMode('fly', { lock: false });
   }
 
   // ---- input -------------------------------------------------------------------------------
 
-  _on(target, type, fn) {
-    target.addEventListener(type, fn);
-    this._listeners.push([target, type, fn]);
+  _on(target, type, fn, opts) {
+    target.addEventListener(type, fn, opts);
+    this._listeners.push([target, type, fn, opts]);
   }
 
   _emit(type, detail) {
@@ -140,17 +181,28 @@ export class Vantage extends EventTarget {
     }
   }
 
+  /** Bindings for a help panel; the mode switch is listed only when the page offers both modes. */
+  get bindings() {
+    return this.modes.length > 1 ? this._bindings : this._bindings.filter((b) => b.intent !== 'mode');
+  }
+
   _keyDown(e) {
     if (!this._enabled || e.metaKey || e.altKey || isEditable(e.target)) return;
+    if (e.code === 'Escape' && this.mode === 'fly' && !this._fly.locked && this.modes.includes('orbit')) {
+      this.setMode('orbit');
+      return;
+    }
     const intent = this._keyMap.get(e.code);
     if (!intent) return;
     this._setInput('keyboard');
     if (intent === 'home') {
       this.home(true);
+    } else if (intent === 'mode') {
+      if (!e.repeat && this.modes.length > 1) this.setMode(this.mode === 'fly' ? 'orbit' : 'fly');
     } else {
       this._held.add(intent);
     }
-    if (e.code.startsWith('Arrow') || e.code === 'Home') e.preventDefault();
+    if (e.code.startsWith('Arrow') || e.code === 'Home' || e.code === 'Space') e.preventDefault();
   }
 
   _keyUp(e) {
@@ -182,20 +234,160 @@ export class Vantage extends EventTarget {
       this._emit('gamepad', { id, connected: !!gp });
     }
     if (!gp) return null;
-    const p = padIntents(gp, this.deadzone);
+    return this._padEdges(padIntents(gp, this.deadzone));
+  }
+
+  /** Apply button edges (speed steps, home, mode) from one pad reading; returns the reading. */
+  _padEdges(p) {
     if (p.active) this._setInput('gamepad');
-    if (p.stepUp && !this._prevPad.stepUp) this._padStep = Math.min(8, this._padStep * 2);
-    if (p.stepDown && !this._prevPad.stepDown) this._padStep = Math.max(1 / 8, this._padStep / 2);
-    if (p.home && !this._prevPad.home) this.home(true);
+    const prev = this._prevPad;
+    if (p.stepUp && !prev.stepUp) this._padStep = Math.min(8, this._padStep * 2);
+    if (p.stepDown && !prev.stepDown) this._padStep = Math.max(1 / 8, this._padStep / 2);
+    if (p.home && !prev.home) this.home(true);
+    if (p.mode && !prev.mode && this.modes.length > 1) this.setMode(this.mode === 'fly' ? 'orbit' : 'fly', { lock: false });
     this._prevPad = p;
     return p;
   }
 
+  // ---- fly mode input ----------------------------------------------------------------------
+
+  _lockChanged() {
+    const locked = typeof document !== 'undefined' && !!this.dom && document.pointerLockElement === this.dom;
+    const was = this._fly.locked;
+    this._fly.locked = locked;
+    // Esc releases the lock (the browser keeps that key); treat it as leaving fly mode.
+    if (was && !locked && this.mode === 'fly' && this.modes.includes('orbit')) this.setMode('orbit');
+  }
+
+  _requestLock() {
+    if (!this.dom || !this.fly.pointerLock || !this.dom.requestPointerLock) return;
+    try {
+      const r = this.dom.requestPointerLock();
+      if (r && r.catch) r.catch(() => {});
+    } catch { /* no gesture or not allowed: drag to look instead */ }
+  }
+
+  _flyPointerDown(e) {
+    if (this.mode !== 'fly' || !this._enabled) return;
+    if (this.fly.pointerLock && !this._fly.locked) this._requestLock();
+    if (e.button === 0) this._fly.dragging = true;
+  }
+
+  _mouseLook(e) {
+    const f = this._fly;
+    if (this.mode !== 'fly' || !this._enabled || !(f.locked || f.dragging)) return;
+    this.turn(e.movementX * this.fly.sensitivity, -e.movementY * this.fly.sensitivity * (this.fly.invertY ? -1 : 1));
+    this._setInput('mouse');
+  }
+
+  _flyWheel(e) {
+    if (this.mode !== 'fly' || !this._enabled) return;
+    e.preventDefault();
+    this.stepFlySpeed(e.deltaY < 0 ? 1 : -1);
+  }
+
+  /** Change the fly speed multiplier by steps of 1.25x (positive is faster). */
+  stepFlySpeed(steps) {
+    const f = this._fly;
+    f.speedMul = Math.min(32, Math.max(1 / 32, f.speedMul * 1.25 ** steps));
+    this._emit('speed', { multiplier: f.speedMul });
+    return f.speedMul;
+  }
+
+  /** Turn the fly camera by degrees: right is positive, up is positive. */
+  turn(rightDeg, upDeg) {
+    const f = this._fly;
+    f.bearing = (((f.bearing + rightDeg) % 360) + 360) % 360;
+    f.elev = Math.max(-89, Math.min(89, f.elev + upDeg));
+    f.turned = true;
+  }
+
+  /** Update fly settings (sensitivity, invertY, curve, ...) and remember them when a key is set. */
+  setFlySettings(partial) {
+    Object.assign(this.fly, partial);
+    if (this._settingsKey && typeof localStorage !== 'undefined') {
+      try {
+        const keep = Object.fromEntries(SETTING_KEYS.map((k) => [k, this.fly[k]]));
+        localStorage.setItem(this._settingsKey, JSON.stringify(keep));
+      } catch { /* storage unavailable: settings last for this page only */ }
+    }
+    return { ...this.fly };
+  }
+
+  _loadSettings() {
+    if (!this._settingsKey || typeof localStorage === 'undefined') return {};
+    try {
+      const s = JSON.parse(localStorage.getItem(this._settingsKey) || '{}');
+      return Object.fromEntries(Object.entries(s).filter(([k]) => SETTING_KEYS.includes(k)));
+    } catch {
+      return {};
+    }
+  }
+
+  // ---- fly geometry ------------------------------------------------------------------------
+
+  _flyForward(out) {
+    const b = this._fly.bearing * D2R, e = this._fly.elev * D2R;
+    return out.set(Math.sin(b) * Math.cos(e), Math.sin(e), -Math.cos(b) * Math.cos(e));
+  }
+
+  _flyRight(out) {
+    const b = this._fly.bearing * D2R;
+    return out.set(Math.cos(b), 0, Math.sin(b));
+  }
+
+  _applyFlyCamera() {
+    const f = this._fly;
+    const fwd = this._flyForward(new this.THREE.Vector3());
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.copy(f.pos);
+    this.camera.lookAt(f.pos.x + fwd.x, f.pos.y + fwd.y, f.pos.z + fwd.z);
+    this.camera.updateMatrixWorld();
+  }
+
+  /** Fly speed in metres per second before key, pad and wheel multipliers. */
+  _flyBaseMps() {
+    if (this.speed.mps != null) return this.speed.mps;
+    const f = this._fly;
+    let heightM = f.ref * this.metresPerUnit;
+    if (this.surfaceAt) {
+      const s = this.surfaceAt(f.pos.x, f.pos.z);
+      if (Number.isFinite(s)) heightM = Math.abs(f.pos.y - s) * this.metresPerUnit;
+    }
+    return Math.max(this.speed.minMps, this.speed.rangeFactor * heightM);
+  }
+
+  _updateFly(step, x, y, z, factor, yaw, pitch, sprint) {
+    const f = this._fly;
+    const T = this.THREE;
+    if ((yaw || pitch) && step > 0) {
+      const r = this.fly.padLookDeg * step;
+      this.turn(applyCurve(yaw, this.fly.curve) * r, -applyCurve(pitch, this.fly.curve) * r * (this.fly.invertY ? -1 : 1));
+    }
+    const fwd = this._flyForward(new T.Vector3());
+    const right = this._flyRight(new T.Vector3());
+    const dir = new T.Vector3().addScaledVector(fwd, y).addScaledVector(right, x);
+    dir.y += z;
+    if (dir.lengthSq() > 1) dir.normalize();
+    const mps = this._flyBaseMps() * factor * f.speedMul * (sprint ? 4 : 1);
+    const want = dir.multiplyScalar(mps / this.metresPerUnit);
+    // Ease toward the wanted velocity: about 95 % after accelTime seconds.
+    const k = step > 0 ? 1 - Math.exp(-step / Math.max(1e-3, this.fly.accelTime / 3)) : 0;
+    f.vel.lerp(want, k);
+    if (want.lengthSq() === 0 && f.vel.lengthSq() < 1e-12) f.vel.set(0, 0, 0);
+    const moving = f.vel.lengthSq() > 0;
+    if (moving) f.pos.addScaledVector(f.vel, step);
+    const moved = moving || f.turned;
+    f.turned = false;
+    if (moved) this._applyFlyCamera();
+    return moved;
+  }
+
   // ---- frame loop --------------------------------------------------------------------------
 
-  /** Distance from the eye to the orbit point, in rendered metres. */
+  /** Distance from the eye to the orbit point (orbit) or the point ahead (fly), in rendered metres. */
   rangeMetres() {
-    return this.controls.distance * this.metresPerUnit;
+    return (this.mode === 'fly' ? this._fly.ref : this.controls.distance) * this.metresPerUnit;
   }
 
   /**
@@ -211,21 +403,25 @@ export class Vantage extends EventTarget {
     if (this._held.size && typeof document !== 'undefined' && document.hasFocus && !document.hasFocus()) {
       this._held.clear();
     }
+    let x = 0, y = 0, z = 0, factor = 1, yaw = 0, pitch = 0, sprint = false;
     if (this._enabled) {
-      const k = keyIntents(this._held);
-      let { x, y, z, factor } = k;
-      let yaw = 0;
-      let pitch = 0;
+      ({ x, y, z, factor } = keyIntents(this._held));
       const p = this._pollPad();
       if (p) {
-        x += p.x; y += p.y; z += p.z;
+        const curve = this.mode === 'fly' ? this.fly.curve : 1;
+        x += applyCurve(p.x, curve); y += applyCurve(p.y, curve); z += p.z;
         yaw = p.yaw; pitch = p.pitch;
         factor *= this._padStep;
+        sprint = p.sprint;
       }
       x = clamp1(x); y = clamp1(y); z = clamp1(z);
+    }
+    if (this.mode === 'fly') {
+      moved = this._updateFly(step, x, y, z, factor, yaw, pitch, sprint);
+    } else {
       if ((x || y || z) && step > 0) {
         const mps = this.speed.mps ?? Math.max(this.speed.minMps, this.speed.rangeFactor * this.rangeMetres());
-        const d = (mps * factor * step) / this.metresPerUnit;
+        const d = (mps * factor * (sprint ? 4 : 1) * step) / this.metresPerUnit;
         this.camera.updateMatrix();
         if (x) c.truck(x * d, 0, false);
         if (y) c.forward(y * d, false);
@@ -237,18 +433,18 @@ export class Vantage extends EventTarget {
         c.rotate(yaw * r, pitch * r, false);
         moved = true;
       }
+      moved = c.update(step) || moved;
     }
-    moved = c.update(step) || moved;
     // A zero-size element (hidden or collapsed) makes camera-controls divide by zero, and one
     // NaN poisons the camera for good. Return to the last finite view instead.
-    const p = this.camera.position;
-    if (Number.isFinite(p.x + p.y + p.z)) {
+    const cp = this.camera.position;
+    if (Number.isFinite(cp.x + cp.y + cp.z)) {
       if (moved || !this._lastGood) {
-        this._lastGood = [p.toArray(), this.getTarget().toArray()];
+        this._lastGood = [cp.toArray(), this.getTarget().toArray()];
       }
     } else if (this._lastGood) {
-      c.setLookAt(...this._lastGood[0], ...this._lastGood[1], false);
-      c.update(0);
+      this.setLookAt(this._lastGood[0], this._lastGood[1], false);
+      if (this.mode === 'orbit') c.update(0);
       this._emit('recover');
     }
     if (moved) {
@@ -262,19 +458,70 @@ export class Vantage extends EventTarget {
     return moved;
   }
 
+  // ---- modes -------------------------------------------------------------------------------
+
+  /**
+   * Switch between 'orbit' and 'fly' (only among the page's `modes`). Entering fly mode keeps the
+   * view and, from a user gesture, captures the pointer; leaving it places the orbit point ahead
+   * at the same distance, so the view does not jump.
+   */
+  setMode(mode, { lock = true } = {}) {
+    if (!this.modes.includes(mode)) throw new Error(`vantagekit: mode '${mode}' is not offered (modes: ${this.modes.join(', ')})`);
+    if (mode === this.mode) return;
+    const eye = this.getPosition();
+    const target = this.getTarget();
+    if (mode === 'fly') {
+      this.controls.enabled = false;
+      this.mode = 'fly';
+      this._fly.vel.set(0, 0, 0);
+      this.setLookAt(eye, target);
+      if (lock) this._requestLock();
+    } else {
+      this.mode = 'orbit';
+      this._fly.dragging = false;
+      if (typeof document !== 'undefined' && document.pointerLockElement === this.dom && document.exitPointerLock) {
+        document.exitPointerLock();
+      }
+      this.controls.enabled = this._enabled;
+      this.controls.setLookAt(eye.x, eye.y, eye.z, target.x, target.y, target.z, false);
+      this.controls.update(0);
+    }
+    this._linkDirty = true;
+    this._emit('modechange', { mode });
+  }
+
   // ---- camera access -----------------------------------------------------------------------
 
   getTarget(out) {
-    return this.controls.getTarget(out || new this.THREE.Vector3());
+    const o = out || new this.THREE.Vector3();
+    if (this.mode === 'fly') {
+      return this._flyForward(o).multiplyScalar(this._fly.ref).add(this._fly.pos);
+    }
+    return this.controls.getTarget(o);
   }
 
   getPosition(out) {
-    return this.controls.getPosition(out || new this.THREE.Vector3());
+    const o = out || new this.THREE.Vector3();
+    return this.mode === 'fly' ? o.copy(this._fly.pos) : this.controls.getPosition(o);
   }
 
   setLookAt(eye, target, animate = false) {
     const [ex, ey, ez] = xyz(eye);
     const [tx, ty, tz] = xyz(target);
+    if (this.mode === 'fly') {
+      const f = this._fly;
+      const dx = tx - ex, dy = ty - ey, dz = tz - ez;
+      const len = Math.hypot(dx, dy, dz);
+      f.pos.set(ex, ey, ez);
+      if (len > 0) {
+        f.ref = len;
+        f.elev = Math.max(-89, Math.min(89, Math.asin(dy / len) / D2R));
+        f.bearing = ((Math.atan2(dx, -dz) / D2R) % 360 + 360) % 360;
+      }
+      f.turned = true;
+      this._applyFlyCamera();
+      return Promise.resolve();
+    }
     return this.controls.setLookAt(ex, ey, ez, tx, ty, tz, animate);
   }
 
@@ -298,12 +545,14 @@ export class Vantage extends EventTarget {
 
   /** Remember the current view for home(). */
   saveHome() {
-    this.controls.saveState();
+    this._home = [this.getPosition().toArray(), this.getTarget().toArray()];
   }
 
-  /** Return to the saved view. */
+  /** Return to the saved view (in either mode). */
   home(animate = true) {
-    return this.controls.reset(animate);
+    if (!this._home) return Promise.resolve();
+    this._fly.vel.set(0, 0, 0);
+    return this.setLookAt(this._home[0], this._home[1], animate);
   }
 
   /**
@@ -322,19 +571,18 @@ export class Vantage extends EventTarget {
 
   setEnabled(on) {
     this._enabled = !!on;
-    this.controls.enabled = !!on;
-    if (!on) this._held.clear();
-  }
-
-  /** 'orbit' only in this release; fly mode is planned. */
-  setMode(mode) {
-    if (mode !== 'orbit') throw new Error(`vantagekit: mode '${mode}' is not available yet`);
-    this.mode = mode;
+    this.controls.enabled = !!on && this.mode === 'orbit';
+    if (!on) { this._held.clear(); this._fly.dragging = false; }
   }
 
   /** Change the scene origin (for example when a new dataset loads). */
   setOrigin(origin) {
     this.frame = origin ? localFrame({ origin, metresPerUnit: this.metresPerUnit, axes: this._axes }) : null;
+  }
+
+  /** Set or clear the surface height lookup used for fly speed: (x, z) -> scene y, or null. */
+  setSurface(fn) {
+    this.surfaceAt = fn || null;
   }
 
   /** Camera facts for field renderers: level of detail, screen-space sizes. */
@@ -346,12 +594,13 @@ export class Vantage extends EventTarget {
     const heightPx = (this.dom && this.dom.clientHeight) || 1;
     const viewHeight = 2 * range * Math.tan((fovDeg * D2R) / 2);
     return {
-      eye, target, range,
+      eye, target, range, mode: this.mode,
       rangeMetres: range * this.metresPerUnit,
       metresPerPixelAtTarget: (viewHeight * this.metresPerUnit) / heightPx,
       fovDeg,
       exaggeration: this._exag(),
       metresPerUnit: this.metresPerUnit,
+      flySpeedMultiplier: this._fly.speedMul,
     };
   }
 
@@ -436,7 +685,10 @@ export class Vantage extends EventTarget {
   }
 
   dispose() {
-    for (const [t, type, fn] of this._listeners) t.removeEventListener(type, fn);
+    if (typeof document !== 'undefined' && this.dom && document.pointerLockElement === this.dom && document.exitPointerLock) {
+      document.exitPointerLock();
+    }
+    for (const [t, type, fn, opts] of this._listeners) t.removeEventListener(type, fn, opts);
     this._listeners = [];
     this.controls.removeEventListener('controlstart', this._onControlStart);
     this.controls.removeEventListener('rest', this._onRest);
