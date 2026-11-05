@@ -63,7 +63,8 @@ const clamp1 = (v) => Math.max(-1, Math.min(1, v));
  * @param {number} [o.minDistance] scene units; the wheel pushes the orbit point ahead past it
  * @param {number} [o.maxDistance=Infinity]
  * @param {number} [o.maxPolarAngle=0.85*PI]
- * @param {boolean} [o.keys=true]
+ * @param {boolean|'focus'} [o.keys=true] keyboard input: true listens on the page, 'focus' only
+ *   while the viewer element has focus (it gets tabindex 0 and takes focus on a click or tap)
  * @param {boolean} [o.gamepad=true]
  * @param {{mps?:number, rangeFactor?:number, minMps?:number}} [o.speed] fixed m/s, or a fraction of the view range (orbit) or height (fly) per second
  * @param {boolean|{app?:{read?:Function,write?:Function}}} [o.link=false] keep the camera in the URL
@@ -171,10 +172,19 @@ export class Vantage extends EventTarget {
     c.addEventListener('rest', this._onRest);
 
     this._listeners = [];
+    // keys: true listens on the whole page; 'focus' only while the viewer element has focus (a
+    // click or tap gives it focus, Tab reaches it), so arrows and Space still scroll the page.
+    this._keysFocus = o.keys === 'focus' && !!this.dom;
     if (o.keys !== false && typeof window !== 'undefined') {
-      this._on(window, 'keydown', (e) => this._keyDown(e));
+      const keyTarget = this._keysFocus ? this.dom : window;
+      this._on(keyTarget, 'keydown', (e) => this._keyDown(e));
       this._on(window, 'keyup', (e) => this._keyUp(e));
       this._on(window, 'blur', () => this._held.clear());
+      if (this._keysFocus) {
+        if (this.dom.hasAttribute && !this.dom.hasAttribute('tabindex')) this.dom.tabIndex = 0;
+        this._on(this.dom, 'pointerdown', () => { if (this.dom.focus) this.dom.focus({ preventScroll: true }); });
+        this._on(this.dom, 'blur', () => this._held.clear());
+      }
     }
     if (typeof document !== 'undefined') {
       this._on(document, 'visibilitychange', () => this._held.clear());

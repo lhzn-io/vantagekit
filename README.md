@@ -43,7 +43,7 @@ copy of three.js however it loads it.
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.3.0/vantagekit-three.js"
+    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.3.1/vantagekit-three.js"
   }
 }
 </script>
@@ -61,6 +61,7 @@ const nav = createVantage({
   modes: ['orbit', 'fly'],             // or ['orbit'] or ['fly']; default both
   mode: 'orbit',                       // starting mode; default the first of modes
   link: true,                          // keep the camera in the URL
+  keys: true,                          // or 'focus' for a viewer inside a scrolling page
 });
 
 nav.readLink();                        // early: read a linked camera, if any
@@ -104,6 +105,14 @@ ones fast; without it, of the distance to the orbit point when fly mode began. M
 and out over about 0.15 s. The fly settings `sensitivity` (degrees per pixel), `invertY` and
 `curve` can be changed with `setFlySettings()` and remembered per browser with `settingsKey`.
 Flying through terrain is allowed.
+
+## Keyboard scope
+
+By default the keys listen on the whole page, which suits a full-window viewer. A viewer embedded
+in a page with text around it should pass `keys: 'focus'`: the keys then act only while the
+viewer's element has focus, so the arrow keys and Space still scroll the page otherwise. The
+element gets `tabindex="0"` (unless it has one) and takes focus on a click or tap; Tab also
+reaches it. Held keys are released when focus leaves. `keys: false` turns the keyboard off.
 
 ## Phones and tablets
 

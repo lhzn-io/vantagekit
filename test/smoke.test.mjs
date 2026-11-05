@@ -24,7 +24,7 @@ function make(opts = {}) {
 }
 
 test('module loads without a GPU or DOM', () => {
-  assert.equal(VERSION, '0.3.0');
+  assert.equal(VERSION, '0.3.1');
   const v = make();
   assert.ok(v.controls);
   v.dispose();
@@ -305,6 +305,52 @@ test('home works in both modes', () => {
   v.update(0.016);
   close(v.getPosition().distanceTo(new THREE.Vector3(0, 50, 50)), 0, 1e-6);
   v.dispose();
+});
+
+// ---- keyboard scope -------------------------------------------------------------------------
+
+test("keys: 'focus' listens on the viewer element, not the page", () => {
+  // A minimal page: window, document and an element are plain EventTargets.
+  const saved = { window: globalThis.window, document: globalThis.document };
+  const doc = Object.assign(new EventTarget(), { activeElement: null, hasFocus: () => true, pointerLockElement: null });
+  globalThis.window = new EventTarget();
+  globalThis.document = doc;
+  class El extends EventTarget {
+    constructor() { super(); this.style = {}; this.attrs = {}; this.clientHeight = 100; this.ownerDocument = doc; }
+    hasAttribute(k) { return k in this.attrs; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    removeAttribute(k) { delete this.attrs[k]; }
+    setPointerCapture() {}
+    releasePointerCapture() {}
+    set tabIndex(v) { this.attrs.tabindex = String(v); }
+    get tabIndex() { return Number(this.attrs.tabindex ?? -1); }
+    focus() { doc.activeElement = this; }
+    getBoundingClientRect() { return new DOMRect(0, 0, 100, 100); }
+    getRootNode() { return doc; }
+  }
+  const key = (type, code) => Object.assign(new Event(type), { code, key: code, repeat: false, metaKey: false, altKey: false, preventDefault() { this.prevented = true; } });
+  try {
+    const dom = new El();
+    const v = make({ dom, keys: 'focus', metresPerUnit: 1, speed: { mps: 10 } });
+    assert.equal(dom.tabIndex, 0);
+    const onPage = key('keydown', 'ArrowUp');
+    window.dispatchEvent(onPage);
+    assert.equal(v._held.size, 0);                 // the page keeps its arrow keys
+    assert.ok(!onPage.prevented);
+    const onViewer = key('keydown', 'ArrowUp');
+    dom.dispatchEvent(onViewer);
+    assert.ok(v._held.has('forward'));
+    assert.ok(onViewer.prevented);
+    window.dispatchEvent(key('keyup', 'ArrowUp'));  // released anywhere
+    assert.equal(v._held.size, 0);
+    dom.dispatchEvent(key('keydown', 'KeyW'));
+    dom.dispatchEvent(new Event('blur'));           // focus leaves: nothing stays held
+    assert.equal(v._held.size, 0);
+    v.dispose();
+  } finally {
+    globalThis.window = saved.window;
+    globalThis.document = saved.document;
+  }
 });
 
 // ---- touch ----------------------------------------------------------------------------------
