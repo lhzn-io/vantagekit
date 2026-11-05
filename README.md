@@ -117,6 +117,17 @@ reaches it. Held keys are released when focus leaves. `keys: false` turns the ke
 
 ## Phones and tablets
 
+On a phone, fly mode works better than orbit: one-finger look and two-finger move respond
+directly, while orbit's pinch zoom feels slow (a known issue, below). A page offering both modes
+can start phones in fly:
+
+```js
+const touchFirst = matchMedia('(pointer: coarse)').matches;
+createVantage({ ...options, modes: ['orbit', 'fly'], mode: touchFirst ? 'fly' : 'orbit' });
+```
+
+The demo does this.
+
 Touch works without page code: vantagekit sets `touch-action: none` on the canvas, so drags do not
 scroll the page. Pass `touches` (camera-controls touch actions) to choose other orbit gestures.
 A touch device has no F key, so a page that offers both modes needs a button that calls
@@ -127,6 +138,10 @@ gestures. `fitBox` steps back on a portrait screen so the box still fits across 
 aspect before framing. For battery and frame rate, cap the renderer's pixel ratio on phones
 (`renderer.setPixelRatio(Math.min(devicePixelRatio, 2))`). `touchBindings` lists the gestures for
 a help panel.
+
+Known issue: on a real phone, orbit's pinch zoom responds slowly. The likely causes are
+camera-controls' pinch dolly rate and the orbit smoothing (`smoothTime`, 0.25 s) adding up; a fix
+needs testing on devices.
 
 ## API
 

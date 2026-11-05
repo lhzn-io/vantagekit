@@ -90,6 +90,9 @@ const touchFirst = matchMedia('(pointer: coarse)').matches;
 const hasTouch = touchFirst || matchMedia('(any-pointer: coarse)').matches;
 const hasMouse = matchMedia('(any-pointer: fine)').matches || !hasTouch;
 const lookKey = touchFirst ? 'touchSensitivity' : 'sensitivity';
+// Fly mode works better than orbit on a phone, so touch-first devices start in it unless the
+// link says otherwise; the mode button still switches.
+if (touchFirst && !params.get('mode')) startMode = 'fly';
 if (touchFirst) {
   sel('sens-name').textContent = 'Fly touch look';
   Object.assign(sel('sens'), { min: 0.05, max: 1, step: 0.05 });
