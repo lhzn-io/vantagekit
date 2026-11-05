@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vantagekit MapLibre demo</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0a12; color: #d8dce6; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+  #map { position: absolute; inset: 0; }
+  #panel { position: absolute; top: 12px; left: 12px; width: 260px; max-height: calc(100% - 24px); overflow: auto; box-sizing: border-box; padding: 8px 12px; background: rgba(16, 18, 28, 0.88); border: 1px solid #2a2f40; border-radius: 6px; }
+  #panel summary { font-size: 14px; font-weight: 600; cursor: pointer; padding: 2px 0; }
+  #keys { margin: 8px 0 0; padding: 0; list-style: none; color: #9aa3b8; font-size: 12px; }
+  #keys b { color: #d8dce6; font-weight: 600; }
+  #mode-btn { position: absolute; top: 12px; right: 12px; min-width: 88px; padding: 8px 12px; background: #1d3b52; color: #d8dce6; border: 1px solid #2f5d7f; border-radius: 6px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  .hint { margin-top: 6px; color: #9aa3b8; font-size: 12px; }
+  #status { margin-top: 8px; font: 12px ui-monospace, monospace; color: #8fc1ff; white-space: pre-wrap; }
+  @media (max-width: 600px) { #panel { width: min(300px, calc(100% - 120px)); } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<button id="mode-btn" type="button">Fly (F)</button>
+<details id="panel" open>
+  <summary>vantagekit on MapLibre</summary>
+  <div>An invented coastline drawn from GeoJSON in the page, with a 1 km grid, no tiles or data service.</div>
+  <div class="hint">Click the map first: the keys act while it has focus. Orbit is MapLibre's own mouse and touch;
+    vantagekit adds the keys, a gamepad and fly mode (drag to look, the wheel sets the speed, Esc returns).</div>
+  <ul id="keys"></ul>
+  <div id="status"></div>
+</details>
+<script type="module">
+import { createMapVantage } from '../vantagekit-maplibre.js';
+
+// An invented coastline: land to the north with a bay and a headland, an island offshore.
+const ORIGIN = [-70.5, 42.5];
+const km = (e, n) => [ORIGIN[0] + e / (111.32 * Math.cos(ORIGIN[1] * Math.PI / 180)), ORIGIN[1] + n / 111.32];
+const shore = [];
+for (let e = -12; e <= 12; e += 0.25) {
+  const n = 2 + 1.5 * Math.sin(e / 2.2) - 3 * Math.exp(-((e - 3) ** 2) / 4) + 2.5 * Math.exp(-((e + 6) ** 2) / 2);
+  shore.push(km(e, n));
+}
+const land = [...shore, km(12, 12), km(-12, 12), shore[0]];
+const island = [];
+for (let a = 0; a <= 2 * Math.PI + 1e-9; a += Math.PI / 24) island.push(km(4 + 1.6 * Math.cos(a), -5 + 0.9 * Math.sin(a)));
+const grid = [];
+for (let i = -12; i <= 12; i++) { grid.push([km(i, -12), km(i, 12)]); grid.push([km(-12, i), km(12, i)]); }
+
+const map = new maplibregl.Map({
+  container: 'map',
+  center: km(0, -2), zoom: 11.2, pitch: 55, bearing: 20, maxPitch: 85,
+  attributionControl: false,
+  style: {
+    version: 8,
+    sources: {
+      land: { type: 'geojson', data: { type: 'FeatureCollection', features: [
+        { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [land] } },
+        { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [island] } },
+      ] } },
+      grid: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: grid } } },
+    },
+    layers: [
+      { id: 'sea', type: 'background', paint: { 'background-color': '#16324a' } },
+      { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': '#5b6b4a' } },
+      { id: 'shore', type: 'line', source: 'land', paint: { 'line-color': '#c9b98f', 'line-width': 1.5 } },
+      { id: 'grid', type: 'line', source: 'grid', paint: { 'line-color': '#ffffff', 'line-opacity': 0.12, 'line-width': 1 } },
+    ],
+  },
+});
+
+const sel = (id) => document.getElementById(id);
+const touchFirst = matchMedia('(pointer: coarse)').matches;
+const keyName = (c) => c.replace(/^Key/, '').replace(/^Arrow/, '').replace(/(Left|Right)$/, '').replace('Control', 'Ctrl');
+let nav = null, lastInput = 'none';
+
+map.on('load', () => {
+  nav = createMapVantage({ maplibregl, map, fly: { minAltitude: 5 } });
+  nav.saveHome();
+  sel('keys').innerHTML = nav.bindings
+    .map((b) => `<li><b>${[...new Set([...b.keys.map(keyName), b.pad].filter(Boolean))].join(', ')}</b>: ${b.label}</li>`)
+    .join('');
+  if (touchFirst) sel('panel').open = false;
+  const show = () => { sel('mode-btn').textContent = nav.mode === 'fly' ? 'Orbit (Esc)' : 'Fly (F)'; };
+  nav.addEventListener('modechange', show);
+  nav.addEventListener('input', (e) => { lastInput = e.detail.kind; });
+  sel('mode-btn').addEventListener('click', (e) => { nav.setMode(nav.mode === 'fly' ? 'orbit' : 'fly'); e.currentTarget.blur(); map.getCanvas().focus(); });
+  map.on('render', () => {
+    const s = nav.flyState();
+    sel('status').textContent = nav.mode === 'fly'
+      ? `fly, ${Math.round(s.alt)} m up, heading ${Math.round(s.bearing)}, speed x${s.speedMultiplier.toFixed(2)}\ninput ${lastInput}`
+      : `orbit, range ${Math.round(nav.rangeMetres())} m, bearing ${Math.round(map.getBearing())}, pitch ${Math.round(map.getPitch())}\ninput ${lastInput}`;
+  });
+  window.vantage = () => nav;   // for debugging in the console
+});
+</script>
+</body>
+</html>

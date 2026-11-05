@@ -5,7 +5,8 @@
 *The demo page, an invented coastline built in the page with no data service. The side panel lists the bindings and the live range, metres per pixel, bearing and pitch.*
 
 **[Open the live demo](https://lhzn-io.github.io/vantagekit/demo/)** (mouse, keyboard, gamepad or
-touch). `?mode=fly` starts in fly mode.
+touch). `?mode=fly` starts in fly mode. A [MapLibre demo](https://lhzn-io.github.io/vantagekit/demo/maplibre.html)
+shows the same keys and fly mode on a MapLibre GL JS map.
 
 Shared navigation for viewers of Earth-system model domains: terrain, seabed, ocean and atmosphere
 scenes in the browser. It sits on top of
@@ -33,7 +34,8 @@ writes for itself:
 
 The core (`vantagekit.js`) has no renderer dependency. The three.js adapter
 (`vantagekit-three.js`) takes three.js and camera-controls as arguments, so a page keeps a single
-copy of three.js however it loads it.
+copy of three.js however it loads it. The MapLibre adapter (`vantagekit-maplibre.js`, see
+[MapLibre](#maplibre)) brings the keys, the gamepad and fly mode to a MapLibre GL JS map.
 
 ## Use
 
@@ -43,7 +45,7 @@ copy of three.js however it loads it.
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.3.2/vantagekit-three.js"
+    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.4.0/vantagekit-three.js"
   }
 }
 </script>
@@ -142,6 +144,41 @@ a help panel.
 Known issue: on a real phone, orbit's pinch zoom responds slowly. The likely causes are
 camera-controls' pinch dolly rate and the orbit smoothing (`smoothTime`, 0.25 s) adding up; a fix
 needs testing on devices.
+
+## MapLibre
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script type="module">
+import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.4.0/vantagekit-maplibre.js';
+
+map.on('load', () => {
+  const nav = createMapVantage({ maplibregl, map, fly: { minAltitude: 2 } });
+  nav.saveHome();
+});
+</script>
+```
+
+In orbit mode MapLibre's own mouse and touch handlers keep the camera; vantagekit adds WASD and
+the arrows (moving the centre at half the view distance per second), Q/E to zoom out and in, a
+gamepad (the right stick turns and tilts), and Home. Fly mode takes over: drag to look, WASD where
+you look, Q/E or C/Space down and up, the wheel steps the speed, Esc returns to the map's handlers
+exactly as the page had set them. Fly speed is half the height above the sea surface, or above the
+terrain when the map has terrain, per second; `fly.minAltitude` (metres) keeps the eye above a
+floor, so it can stay above a sea surface drawn over an exaggerated seabed.
+
+MapLibre 4.x caps the pitch at 85 degrees, so the view can look no higher than about 5 degrees
+below the horizon. Fly movement still follows where you aim, level or climbing; only the view is
+held at the cap.
+
+The keyboard listens while the map canvas has focus (`keys: 'focus'`, the default here, since a map
+usually shares the page), and the adapter runs its own frame loop only while something moves the
+camera. A page that drives the camera itself, for example a camera that follows a moving object,
+calls `setEnabled(false)` while it does and `setEnabled(true)` to hand control back; disabling leaves
+fly mode. Other members: `setMode()`, `mode`, `modes`, `bindings`, `saveHome()`, `home()`,
+`stepFlySpeed()`, `turn()`, `flyState()`, `rangeMetres()`, `press()`, `release()`, `update(dt)`,
+`dispose()`. Events: `move`, `input`, `gamepad`, `modechange`, `speed`. Touch fly gestures are not
+in the MapLibre adapter yet.
 
 ## API
 
