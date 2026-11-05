@@ -24,7 +24,7 @@ function make(opts = {}) {
 }
 
 test('module loads without a GPU or DOM', () => {
-  assert.equal(VERSION, '0.3.1');
+  assert.equal(VERSION, '0.3.2');
   const v = make();
   assert.ok(v.controls);
   v.dispose();
@@ -324,7 +324,7 @@ test("keys: 'focus' listens on the viewer element, not the page", () => {
     releasePointerCapture() {}
     set tabIndex(v) { this.attrs.tabindex = String(v); }
     get tabIndex() { return Number(this.attrs.tabindex ?? -1); }
-    focus() { doc.activeElement = this; }
+    focus(opts) { doc.activeElement = this; this.focusOpts = opts; }
     getBoundingClientRect() { return new DOMRect(0, 0, 100, 100); }
     getRootNode() { return doc; }
   }
@@ -333,6 +333,9 @@ test("keys: 'focus' listens on the viewer element, not the page", () => {
     const dom = new El();
     const v = make({ dom, keys: 'focus', metresPerUnit: 1, speed: { mps: 10 } });
     assert.equal(dom.tabIndex, 0);
+    dom.dispatchEvent(new Event('pointerdown'));     // a click focuses without a focus ring or scroll
+    assert.equal(doc.activeElement, dom);
+    assert.deepEqual(dom.focusOpts, { preventScroll: true, focusVisible: false });
     const onPage = key('keydown', 'ArrowUp');
     window.dispatchEvent(onPage);
     assert.equal(v._held.size, 0);                 // the page keeps its arrow keys

@@ -182,7 +182,9 @@ export class Vantage extends EventTarget {
       this._on(window, 'blur', () => this._held.clear());
       if (this._keysFocus) {
         if (this.dom.hasAttribute && !this.dom.hasAttribute('tabindex')) this.dom.tabIndex = 0;
-        this._on(this.dom, 'pointerdown', () => { if (this.dom.focus) this.dom.focus({ preventScroll: true }); });
+        // focusVisible: false keeps a page's keyboard focus ring (:focus-visible) for Tab, not
+        // for a click; browsers without the option ignore it.
+        this._on(this.dom, 'pointerdown', () => { if (this.dom.focus) this.dom.focus({ preventScroll: true, focusVisible: false }); });
         this._on(this.dom, 'blur', () => this._held.clear());
       }
     }
