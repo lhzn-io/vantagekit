@@ -22,8 +22,11 @@ const FLY_DEFAULTS = {
   padLookDeg: 120,     // right-stick turn rate at full deflection, degrees per second
   accelTime: 0.15,     // seconds to reach about 95 % of the target speed
   pointerLock: true,   // capture the pointer for mouse look; drag to look without it
+  touchSensitivity: 0.25,  // degrees of turn per pixel of one-finger drag
+  touchStickPx: 60,    // two-finger drag distance (CSS px) that counts as full stick deflection
 };
-const SETTING_KEYS = ['sensitivity', 'invertY', 'curve'];
+const SETTING_KEYS = ['sensitivity', 'invertY', 'curve', 'touchSensitivity'];
+const PINCH_STEP = 1.25;   // finger spread ratio per fly speed step
 
 function isEditable(t) {
   return !!t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName || ''));
@@ -54,6 +57,9 @@ const clamp1 = (v) => Math.max(-1, Math.min(1, v));
  * @param {number|Function} [o.exaggeration=1] vertical exaggeration, or a getter read when needed
  * @param {'rotate-left'|'pan-left'} [o.mouse='rotate-left'] orbit mouse button preset
  * @param {'screen'|'ground'} [o.pan='screen'] orbit pan in the screen plane or along the ground
+ * @param {{one?:number,two?:number,three?:number}} [o.touches] orbit touch actions (camera-controls
+ *   ACTION values); by default they follow the mouse preset: 'rotate-left' rotates with one finger
+ *   and pans with two, 'pan-left' pans with one finger and rotates and tilts with two
  * @param {number} [o.minDistance] scene units; the wheel pushes the orbit point ahead past it
  * @param {number} [o.maxDistance=Infinity]
  * @param {number} [o.maxPolarAngle=0.85*PI]
@@ -101,14 +107,30 @@ export class Vantage extends EventTarget {
     const A = CameraControls.ACTION;
     // camera-controls naming: TRUCK pans in the screen plane, SCREEN_PAN drags along the ground.
     const pan = (o.pan ?? 'screen') === 'ground' ? A.SCREEN_PAN : A.TRUCK;
+    const ground = (o.pan ?? 'screen') === 'ground';
     const mouse = o.mouse ?? 'rotate-left';
+    // Touch follows the mouse preset: whatever the left button does, one finger does. Pinch
+    // always zooms (toward the fingers); the two-finger drag does the other of rotate and pan.
     if (mouse === 'rotate-left') {
       Object.assign(c.mouseButtons, { left: A.ROTATE, middle: A.DOLLY, right: pan, wheel: A.DOLLY });
+      Object.assign(c.touches, {
+        one: A.TOUCH_ROTATE,
+        two: ground ? A.TOUCH_DOLLY_SCREEN_PAN : A.TOUCH_DOLLY_TRUCK,
+        three: ground ? A.TOUCH_SCREEN_PAN : A.TOUCH_TRUCK,
+      });
     } else if (mouse === 'pan-left') {
       Object.assign(c.mouseButtons, { left: pan, middle: A.DOLLY, right: A.ROTATE, wheel: A.DOLLY });
+      Object.assign(c.touches, {
+        one: ground ? A.TOUCH_SCREEN_PAN : A.TOUCH_TRUCK,
+        two: A.TOUCH_DOLLY_ROTATE,
+        three: ground ? A.TOUCH_SCREEN_PAN : A.TOUCH_TRUCK,
+      });
     } else {
       throw new Error(`vantagekit: unknown mouse preset '${mouse}'`);
     }
+    this.mousePreset = mouse;
+    this._customTouches = !!o.touches;
+    if (o.touches) Object.assign(c.touches, o.touches);
     c.dollyToCursor = o.dollyToCursor ?? true;
     c.infinityDolly = o.infinityDolly ?? true;
     c.minDistance = o.minDistance ?? 10 / this.metresPerUnit;
@@ -136,8 +158,14 @@ export class Vantage extends EventTarget {
       pos: new THREE.Vector3(), bearing: 0, elev: 0, vel: new THREE.Vector3(),
       ref: 1, speedMul: 1, locked: false, dragging: false, turned: false,
     };
+    // Fly touch state: active touch points by pointer id, the current gesture, and the move
+    // intent a two-finger drag holds (x right, y forward, each -1..1).
+    this._touch = new Map();
+    this._gesture = null;
+    this._touchMove = { x: 0, y: 0 };
+    this._pointerType = 'mouse';
 
-    this._onControlStart = () => this._setInput('mouse');
+    this._onControlStart = () => this._setInput(this._pointerType === 'touch' ? 'touch' : 'mouse');
     this._onRest = () => this._emit('rest');
     c.addEventListener('controlstart', this._onControlStart);
     c.addEventListener('rest', this._onRest);
@@ -154,8 +182,14 @@ export class Vantage extends EventTarget {
       this._on(document, 'mousemove', (e) => this._mouseLook(e));
     }
     if (this.dom) {
+      // Capture on window runs before camera-controls' own handler, so 'controlstart' knows
+      // whether a finger or a mouse started it.
+      this._on(window, 'pointerdown', (e) => { this._pointerType = e.pointerType || 'mouse'; }, { capture: true });
+      if (this.dom.style) this.dom.style.touchAction = 'none';
       this._on(this.dom, 'pointerdown', (e) => this._flyPointerDown(e));
-      this._on(window, 'pointerup', () => { this._fly.dragging = false; });
+      this._on(this.dom, 'pointermove', (e) => this._touchPointerMove(e));
+      this._on(window, 'pointerup', (e) => { this._fly.dragging = false; this._touchUp(e); });
+      this._on(window, 'pointercancel', (e) => { this._fly.dragging = false; this._touchUp(e); });
       this._on(this.dom, 'wheel', (e) => this._flyWheel(e), { passive: false });
     }
     if (start === 'fly') this.setMode('fly', { lock: false });
@@ -269,8 +303,86 @@ export class Vantage extends EventTarget {
 
   _flyPointerDown(e) {
     if (this.mode !== 'fly' || !this._enabled) return;
+    if (e.pointerType === 'touch') { this._touchDown(e); return; }
     if (this.fly.pointerLock && !this._fly.locked) this._requestLock();
     if (e.button === 0) this._fly.dragging = true;
+  }
+
+  // Fly mode touch: one finger looks around; two fingers move like a stick held away from where
+  // they first touched, and pinching steps the speed (spreading is faster).
+
+  _touchDown(e) {
+    this._touch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { if (this.dom && this.dom.setPointerCapture) this.dom.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    this._touchGestureStart();
+    this._setInput('touch');
+    if (e.preventDefault) e.preventDefault();
+  }
+
+  _touchGestureStart() {
+    const pts = [...this._touch.values()];
+    this._touchMove.x = this._touchMove.y = 0;
+    if (pts.length === 0) { this._gesture = null; return; }
+    if (pts.length === 1) { this._gesture = { kind: 'look' }; return; }
+    const [a, b] = pts;
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    this._gesture = { kind: 'move', cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, dRef: d };
+  }
+
+  _touchPointerMove(e) {
+    const prev = this._touch.get(e.pointerId);
+    if (!prev || this.mode !== 'fly' || !this._enabled) return;
+    const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+    prev.x = e.clientX; prev.y = e.clientY;
+    const g = this._gesture;
+    if (!g) return;
+    if (g.kind === 'look') {
+      const s = this.fly.touchSensitivity;
+      this.turn(dx * s, -dy * s * (this.fly.invertY ? -1 : 1));
+    } else {
+      const [a, b] = [...this._touch.values()];
+      const px = this.fly.touchStickPx;
+      this._touchMove.x = clamp1(((a.x + b.x) / 2 - g.cx) / px);
+      this._touchMove.y = clamp1(-((a.y + b.y) / 2 - g.cy) / px);
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (g.dRef > 0) {
+        while (d > g.dRef * PINCH_STEP) { this.stepFlySpeed(1); g.dRef *= PINCH_STEP; }
+        while (d < g.dRef / PINCH_STEP) { this.stepFlySpeed(-1); g.dRef /= PINCH_STEP; }
+      }
+    }
+    this._setInput('touch');
+    if (e.preventDefault) e.preventDefault();
+  }
+
+  _touchUp(e) {
+    if (!e || !this._touch.delete(e.pointerId)) return;
+    this._touchGestureStart();
+  }
+
+  _touchClear() {
+    this._touch.clear();
+    this._gesture = null;
+    this._touchMove.x = this._touchMove.y = 0;
+  }
+
+  /**
+   * Touch gestures for a help panel, for this page's modes and mouse preset:
+   * rows of { gesture, orbit?, fly? }. Pages that pass their own `touches` describe orbit themselves.
+   */
+  get touchBindings() {
+    const orbit = this.modes.includes('orbit') && !this._customTouches;
+    const fly = this.modes.includes('fly');
+    const rot = this.mousePreset === 'rotate-left';
+    const rows = [
+      { gesture: 'One-finger drag', orbit: rot ? 'rotate' : 'pan', fly: 'look around' },
+      { gesture: 'Pinch', orbit: 'zoom toward the fingers', fly: 'speed (spread is faster)' },
+      { gesture: 'Two-finger drag', orbit: rot ? 'pan' : 'rotate and tilt', fly: 'move, like a stick held away from where it began' },
+    ];
+    return rows.map((r) => ({
+      gesture: r.gesture,
+      ...(orbit ? { orbit: r.orbit } : {}),
+      ...(fly ? { fly: r.fly } : {}),
+    })).filter((r) => r.orbit || r.fly);
   }
 
   _mouseLook(e) {
@@ -414,6 +526,10 @@ export class Vantage extends EventTarget {
         factor *= this._padStep;
         sprint = p.sprint;
       }
+      if (this.mode === 'fly') {
+        x += applyCurve(this._touchMove.x, this.fly.curve);
+        y += applyCurve(this._touchMove.y, this.fly.curve);
+      }
       x = clamp1(x); y = clamp1(y); z = clamp1(z);
     }
     if (this.mode === 'fly') {
@@ -479,6 +595,7 @@ export class Vantage extends EventTarget {
     } else {
       this.mode = 'orbit';
       this._fly.dragging = false;
+      this._touchClear();
       if (typeof document !== 'undefined' && document.pointerLockElement === this.dom && document.exitPointerLock) {
         document.exitPointerLock();
       }
@@ -535,11 +652,15 @@ export class Vantage extends EventTarget {
     return this.setLookAt([tx + off.e, ty + off.u, tz - off.n], [tx, ty, tz], animate);
   }
 
-  /** Frame a THREE.Box3: distance is factor times the larger horizontal span. */
+  /**
+   * Frame a THREE.Box3: distance is factor times the larger horizontal span, divided by the
+   * aspect ratio on a portrait screen so the box still fits across a phone held upright.
+   */
   fitBox(box, { bearingDeg = 0, elevationDeg = 40, factor = 0.9, animate = false } = {}) {
     const center = box.getCenter(new this.THREE.Vector3());
     const size = box.getSize(new this.THREE.Vector3());
-    const distance = Math.max(size.x, size.z) * factor;
+    const aspect = this.camera.aspect > 0 ? this.camera.aspect : 1;
+    const distance = (Math.max(size.x, size.z) * factor) / Math.min(1, aspect);
     return this.placeView({ target: center, bearingDeg, elevationDeg, distance, animate });
   }
 
@@ -572,7 +693,7 @@ export class Vantage extends EventTarget {
   setEnabled(on) {
     this._enabled = !!on;
     this.controls.enabled = !!on && this.mode === 'orbit';
-    if (!on) { this._held.clear(); this._fly.dragging = false; }
+    if (!on) { this._held.clear(); this._fly.dragging = false; this._touchClear(); }
   }
 
   /** Change the scene origin (for example when a new dataset loads). */

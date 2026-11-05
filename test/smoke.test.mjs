@@ -24,7 +24,7 @@ function make(opts = {}) {
 }
 
 test('module loads without a GPU or DOM', () => {
-  assert.equal(VERSION, '0.2.0');
+  assert.equal(VERSION, '0.3.0');
   const v = make();
   assert.ok(v.controls);
   v.dispose();
@@ -304,6 +304,74 @@ test('home works in both modes', () => {
   v.home(false);
   v.update(0.016);
   close(v.getPosition().distanceTo(new THREE.Vector3(0, 50, 50)), 0, 1e-6);
+  v.dispose();
+});
+
+// ---- touch ----------------------------------------------------------------------------------
+
+test('fitBox steps back on a portrait screen', () => {
+  const v = make();
+  const box = new THREE.Box3(new THREE.Vector3(-50, 0, -50), new THREE.Vector3(50, 10, 50));
+  v.fitBox(box);
+  v.update(0);
+  const wide = v.controls.distance;
+  v.camera.aspect = 0.5;
+  v.fitBox(box);
+  v.update(0);
+  close(v.controls.distance, wide * 2, 1e-6);
+  v.dispose();
+});
+
+const touchEv = (id, x, y) => ({ pointerId: id, clientX: x, clientY: y, pointerType: 'touch', preventDefault() {} });
+
+test('orbit touch follows the mouse preset', () => {
+  const A = CameraControls.ACTION;
+  const r = make({ mouse: 'rotate-left' });
+  assert.equal(r.controls.touches.one, A.TOUCH_ROTATE);
+  assert.equal(r.controls.touches.two, A.TOUCH_DOLLY_TRUCK);
+  const p = make({ mouse: 'pan-left' });
+  assert.equal(p.controls.touches.one, A.TOUCH_TRUCK);
+  assert.equal(p.controls.touches.two, A.TOUCH_DOLLY_ROTATE);
+  const g = make({ mouse: 'pan-left', pan: 'ground' });
+  assert.equal(g.controls.touches.one, A.TOUCH_SCREEN_PAN);
+  const c = make({ touches: { one: A.TOUCH_ROTATE } });
+  assert.equal(c.controls.touches.one, A.TOUCH_ROTATE);
+  assert.equal(c.touchBindings[0].orbit, undefined);
+  r.dispose(); p.dispose(); g.dispose(); c.dispose();
+});
+
+test('touch help rows follow the modes and preset', () => {
+  const both = make({ mouse: 'pan-left' });
+  assert.equal(both.touchBindings[0].orbit, 'pan');
+  assert.equal(both.touchBindings[0].fly, 'look around');
+  const orbitOnly = make({ modes: ['orbit'] });
+  assert.equal(orbitOnly.touchBindings[0].fly, undefined);
+  assert.equal(orbitOnly.touchBindings[0].orbit, 'rotate');
+  both.dispose(); orbitOnly.dispose();
+});
+
+test('fly touch: one finger looks, two fingers move, pinch steps speed', () => {
+  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 }, fly: { accelTime: 0.001, curve: 1 } });
+  v.setLookAt([0, 10, 0], [0, 10, -10]);
+  const b0 = v._fly.bearing;
+  v._touchDown(touchEv(1, 100, 100));
+  v._touchPointerMove(touchEv(1, 140, 100));          // 40 px right at 0.25 deg/px
+  close(v._fly.bearing, (b0 + 10) % 360, 1e-9);
+  v.setLookAt([0, 10, 0], [0, 10, -10]);              // face north again
+  v._touchDown(touchEv(2, 200, 100));                 // second finger: now a move gesture
+  v._touchPointerMove(touchEv(1, 140, 70));           // both fingers up 30 px: half forward
+  v._touchPointerMove(touchEv(2, 200, 70));
+  close(v._touchMove.y, 0.5, 1e-9);
+  assert.equal(v._fly.speedMul, 1);                   // no pinch yet
+  const z0 = v.getPosition().z;
+  run(v, 1);
+  close(z0 - v.getPosition().z, 5, 0.2);              // half of 10 m/s for 1 s, northward (-z)
+  const mul = v._fly.speedMul;
+  v._touchPointerMove(touchEv(2, 260, 70));           // spread from 60 px to 120 px
+  assert.ok(v._fly.speedMul > mul);
+  v._touchUp(touchEv(1)); v._touchUp(touchEv(2));
+  assert.equal(v._touchMove.y, 0);
+  assert.equal(v._gesture, null);
   v.dispose();
 });
 

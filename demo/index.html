@@ -6,10 +6,17 @@
 <title>vantagekit demo</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
-  html, body { margin: 0; height: 100%; background: #0a0a12; color: #d8dce6; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
-  canvas { display: block; width: 100%; height: 100%; }
-  #panel { position: absolute; top: 12px; left: 12px; width: 260px; padding: 10px 12px; background: rgba(16, 18, 28, 0.88); border: 1px solid #2a2f40; border-radius: 6px; }
-  #panel h1 { font-size: 14px; margin: 0 0 6px; }
+  html, body { margin: 0; height: 100%; background: #0a0a12; color: #d8dce6; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; touch-action: manipulation; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #panel { position: absolute; top: 12px; left: 12px; width: 260px; max-height: calc(100% - 24px); overflow: auto; box-sizing: border-box; padding: 8px 12px; background: rgba(16, 18, 28, 0.88); border: 1px solid #2a2f40; border-radius: 6px; }
+  #panel summary { font-size: 14px; font-weight: 600; cursor: pointer; padding: 2px 0; }
+  #panel[open] summary { margin-bottom: 6px; }
+  #mode-btn { position: absolute; top: 12px; right: 12px; min-width: 88px; padding: 8px 12px; background: #1d3b52; color: #d8dce6; border: 1px solid #2f5d7f; border-radius: 6px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  #mode-btn:disabled { display: none; }
+  @media (max-width: 600px) {
+    #panel { left: 8px; top: 8px; width: min(300px, calc(100% - 120px)); max-height: calc(100% - 16px); }
+    #mode-btn { top: 8px; right: 8px; }
+  }
   #panel label { display: block; margin: 6px 0 2px; color: #9aa3b8; }
   #panel select, #panel input[type=range] { width: 100%; }
   #keys { margin: 8px 0 0; padding: 0; list-style: none; color: #9aa3b8; font-size: 12px; }
@@ -22,8 +29,9 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="panel">
-  <h1>vantagekit demo</h1>
+<button id="mode-btn" type="button">Fly</button>
+<details id="panel" open>
+  <summary>vantagekit demo</summary>
   <div>An invented coastline, 20 km across: hills, a river valley, a shelf with a canyon, and an island.</div>
   <label for="modes">Modes offered (a page setting)</label>
   <select id="modes">
@@ -31,15 +39,14 @@
     <option value="orbit">Orbit only</option>
     <option value="fly">Fly only</option>
   </select>
-  <button id="fly" type="button">Fly (F)</button>
   <div id="fly-hint" class="hint"></div>
-  <label for="sens">Fly mouse look <span id="sens-val"></span></label>
+  <label for="sens"><span id="sens-name">Fly mouse look</span> <span id="sens-val"></span></label>
   <input id="sens" type="range" min="0.03" max="0.4" step="0.01">
   <label><input id="invert" type="checkbox"> Invert Y</label>
-  <label for="mouse">Orbit mouse</label>
+  <label for="mouse">Orbit mouse and touch</label>
   <select id="mouse">
-    <option value="rotate-left">Left rotates, right pans</option>
-    <option value="pan-left">Left pans, right rotates</option>
+    <option value="rotate-left">Left button or one finger rotates</option>
+    <option value="pan-left">Left button or one finger pans</option>
   </select>
   <label for="scale">Metres per scene unit</label>
   <select id="scale">
@@ -52,7 +59,7 @@
   <label><input id="link" type="checkbox" checked> Keep the camera in the URL</label>
   <ul id="keys"></ul>
   <div id="status"></div>
-</div>
+</details>
 <script type="importmap">
 {
   "imports": {
@@ -78,6 +85,16 @@ sel('modes').value = params.get('modes') || 'orbit,fly';
 let startMode = params.get('mode') || null;   // ?mode=fly starts in fly mode
 
 const canvas = sel('c');
+// Phones and tablets: touch help, touch look sensitivity, and the panel starts folded.
+const touchFirst = matchMedia('(pointer: coarse)').matches;
+const hasTouch = touchFirst || matchMedia('(any-pointer: coarse)').matches;
+const hasMouse = matchMedia('(any-pointer: fine)').matches || !hasTouch;
+const lookKey = touchFirst ? 'touchSensitivity' : 'sensitivity';
+if (touchFirst) {
+  sel('sens-name').textContent = 'Fly touch look';
+  Object.assign(sel('sens'), { min: 0.05, max: 1, step: 0.05 });
+}
+if (matchMedia('(max-width: 600px)').matches) sel('panel').open = false;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
@@ -208,21 +225,27 @@ function makeNav() {
   nav.addEventListener('input', (e) => { lastInput = e.detail.kind; });
   nav.addEventListener('gamepad', (e) => { padName = e.detail.connected ? e.detail.id : 'none'; });
   nav.addEventListener('modechange', (e) => { startMode = e.detail.mode; showMode(); });
-  sel('keys').innerHTML = nav.bindings
-    .map((b) => `<li><b>${[...b.keys.map(keyName), b.pad].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</b>: ${b.label}</li>`)
-    .join('');
-  sel('sens').value = nav.fly.sensitivity;
+  const both = nav.modes.length > 1;
+  const touchRows = hasTouch ? nav.touchBindings.map((t) => `<li><b>${t.gesture}</b>: ${
+    [t.orbit && (both ? `orbit, ${t.orbit}` : t.orbit), t.fly && (both ? `fly, ${t.fly}` : t.fly)].filter(Boolean).join('; ')
+  }</li>`) : [];
+  const keyRows = hasMouse ? nav.bindings
+    .map((b) => `<li><b>${[...b.keys.map(keyName), b.pad].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</b>: ${b.label}</li>`) : [];
+  sel('keys').innerHTML = [...touchRows, ...keyRows].join('');
+  sel('sens').value = nav.fly[lookKey];
   sel('invert').checked = nav.fly.invertY;
   showMode();
 }
 
 function showMode() {
   const fly = nav.mode === 'fly', both = nav.modes.length > 1;
-  sel('fly').textContent = fly ? 'Orbit (F or Esc)' : 'Fly (F)';
-  sel('fly').disabled = !both;
-  sel('fly-hint').textContent = fly
-    ? 'Click the scene to capture the mouse (or drag to look). The wheel sets the speed.'
-    : (both ? '' : 'This page offers orbit only.');
+  sel('mode-btn').textContent = fly ? (hasMouse ? 'Orbit (F)' : 'Orbit') : (hasMouse ? 'Fly (F)' : 'Fly');
+  sel('mode-btn').disabled = !both;
+  sel('fly-hint').textContent = !fly
+    ? (both ? '' : 'This page offers orbit only.')
+    : touchFirst
+      ? 'Drag to look. Two fingers: drag to move, pinch to change speed. Look up or down to climb or dive.'
+      : 'Click the scene to capture the mouse (or drag to look). The wheel sets the speed. Esc returns to orbit.';
   sel('sens-val').textContent = `${(+sel('sens').value).toFixed(2)} deg/px`;
 }
 
@@ -251,8 +274,12 @@ function remake({ rebuild = false } = {}) {
   nav.writeLink();
 }
 
-sel('fly').addEventListener('click', () => nav.setMode(nav.mode === 'fly' ? 'orbit' : 'fly'));
-sel('sens').addEventListener('input', () => { nav.setFlySettings({ sensitivity: +sel('sens').value }); showMode(); });
+sel('mode-btn').addEventListener('click', (e) => {
+  // A tap must not grab a pointer lock that a touch device cannot release with Esc.
+  nav.setMode(nav.mode === 'fly' ? 'orbit' : 'fly', { lock: e.pointerType !== 'touch' && hasMouse });
+  e.currentTarget.blur();
+});
+sel('sens').addEventListener('input', () => { nav.setFlySettings({ [lookKey]: +sel('sens').value }); showMode(); });
 sel('invert').addEventListener('change', () => nav.setFlySettings({ invertY: sel('invert').checked }));
 sel('modes').addEventListener('change', () => remake());
 sel('mouse').addEventListener('change', () => remake());
@@ -275,8 +302,8 @@ function resize() {
 }
 addEventListener('resize', resize);
 
+resize();   // before framing: fitBox reads the aspect ratio
 frame();
-resize();
 const clock = new THREE.Clock();
 let frames = 0;
 renderer.setAnimationLoop(() => {

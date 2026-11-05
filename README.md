@@ -4,8 +4,8 @@
 
 *The demo page, an invented coastline built in the page with no data service. The side panel lists the bindings and the live range, metres per pixel, bearing and pitch.*
 
-**[Open the live demo](https://lhzn-io.github.io/vantagekit/demo/)** (desktop: mouse, keyboard or a
-gamepad; touch input is planned). `?mode=fly` starts in fly mode.
+**[Open the live demo](https://lhzn-io.github.io/vantagekit/demo/)** (mouse, keyboard, gamepad or
+touch). `?mode=fly` starts in fly mode.
 
 Shared navigation for viewers of Earth-system model domains: terrain, seabed, ocean and atmosphere
 scenes in the browser. It sits on top of
@@ -21,6 +21,9 @@ writes for itself:
 - **Keyboard and gamepad input in real units.** WASD, Q/E (or Space/C) and the arrow keys move at a
   speed in metres per second, independent of frame rate. An Xbox-style controller (standard
   mapping) moves, looks around, switches mode and resets the view.
+- **Touch in both modes.** Orbit gestures follow the mouse preset (one finger does what the left
+  button does; pinch zooms). In fly mode one finger looks around, two fingers move like a stick and
+  pinching sets the speed.
 - **Scale and exaggeration aware.** Speeds and links are expressed in metres, whatever the scene
   unit and the vertical exaggeration.
 - **Framing helpers.** `fitBox`, `placeView` (bearing, elevation, distance), `saveHome` and `home`,
@@ -40,7 +43,7 @@ copy of three.js however it loads it.
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.2.0/vantagekit-three.js"
+    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.3.0/vantagekit-three.js"
   }
 }
 </script>
@@ -54,7 +57,7 @@ const nav = createVantage({
   origin: { lon: -70.5, lat: 42.5 },   // scene origin, for geographic links
   metresPerUnit: 100,                  // one scene unit is 100 m
   exaggeration: () => settings.exag,   // vertical exaggeration, read when needed
-  mouse: 'pan-left',                   // orbit mouse: or 'rotate-left'
+  mouse: 'pan-left',                   // orbit mouse and touch: or 'rotate-left'
   modes: ['orbit', 'fly'],             // or ['orbit'] or ['fly']; default both
   mode: 'orbit',                       // starting mode; default the first of modes
   link: true,                          // keep the camera in the URL
@@ -92,6 +95,8 @@ the same distance, so the view does not jump. `modes: ['fly']` gives a fly-only 
 | Left stick | move | move, with a response curve |
 | Right stick | rotate around the orbit point | look from where you are |
 | Triggers, LB/RB, stick click, A | down and up, speed steps, x4, home | the same |
+| One finger | rotate (`rotate-left`) or pan (`pan-left`) | look around |
+| Two fingers | pinch zooms; dragging pans (`rotate-left`) or rotates and tilts (`pan-left`) | drag moves like a stick held away from where it began; pinch sets the speed |
 
 Fly speed per second is a fraction (`speed.rangeFactor`, 0.5) of your height above the surface
 when the page supplies `surfaceAt(x, z)` (scene units in and out), so low passes are slow and high
@@ -99,6 +104,19 @@ ones fast; without it, of the distance to the orbit point when fly mode began. M
 and out over about 0.15 s. The fly settings `sensitivity` (degrees per pixel), `invertY` and
 `curve` can be changed with `setFlySettings()` and remembered per browser with `settingsKey`.
 Flying through terrain is allowed.
+
+## Phones and tablets
+
+Touch works without page code: vantagekit sets `touch-action: none` on the canvas, so drags do not
+scroll the page. Pass `touches` (camera-controls touch actions) to choose other orbit gestures.
+A touch device has no F key, so a page that offers both modes needs a button that calls
+`setMode()`; pass `{ lock: false }` from a tap, since a phone has no Esc to release a pointer lock.
+In fly mode there is no up or down gesture: look up or down and move. `fly.touchSensitivity`
+(degrees per pixel, 0.25) and `fly.touchStickPx` (drag distance for full speed, 60) tune the
+gestures. `fitBox` steps back on a portrait screen so the box still fits across it; set the camera
+aspect before framing. For battery and frame rate, cap the renderer's pixel ratio on phones
+(`renderer.setPixelRatio(Math.min(devicePixelRatio, 2))`). `touchBindings` lists the gestures for
+a help panel.
 
 ## API
 
@@ -120,10 +138,10 @@ Flying through terrain is allowed.
 | `readLink()`, `applyLink()`, `writeLink()` | Camera links in the URL |
 | `viewInfo()` | Eye, target, range and metres per pixel, for level of detail and screen-space sizes |
 | `press(intent)`, `release(intent)` | Drive movement from your own controls |
-| `bindings` | Key and pad bindings, for a help panel |
+| `bindings`, `touchBindings` | Key and pad bindings, and touch gestures, for a help panel |
 | `setEnabled(on)`, `setOrigin(origin)`, `dispose()` | Lifecycle |
 
-Events: `move`, `rest`, `input` (`mouse`, `keyboard` or `gamepad`), `gamepad` (connected or
+Events: `move`, `rest`, `input` (`mouse`, `touch`, `keyboard` or `gamepad`), `gamepad` (connected or
 disconnected), `link` (URL rewritten), `modechange`, `speed` (fly speed multiplier changed),
 `recover` (a non-finite camera was reset to the last good view).
 
