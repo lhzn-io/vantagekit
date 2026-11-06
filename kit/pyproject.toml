@@ -1,0 +1,5 @@
+# Test configuration for the Kit package. The package itself is loaded by Kit as the
+# extension in exts/lhzn.vantagekit; it is not built or installed with pip.
+[tool.pytest.ini_options]
+pythonpath = ["exts/lhzn.vantagekit"]
+testpaths = ["tests"]

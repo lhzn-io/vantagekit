@@ -1,0 +1,16 @@
+[package]
+title = "vantagekit"
+description = "Shared camera and input controls for Kit viewers: free, chase, point-of-view and orbit modes on any stage up axis and unit, bindings as data, and a clean handover to Kit's native navigation."
+version = "0.1.0"
+authors = ["Long Horizon Observatory"]
+repository = "https://github.com/lhzn-io/vantagekit"
+keywords = ["camera", "input", "navigation", "viewer"]
+category = "Viewport"
+
+[dependencies]
+"omni.usd" = {}
+"omni.kit.viewport.utility" = {}
+
+# The core (vantagekit.core) imports no Kit; this module holds the Kit adapters.
+[[python.module]]
+name = "vantagekit.kit"

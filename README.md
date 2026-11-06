@@ -239,11 +239,58 @@ without `cv` are read as six scene-unit numbers (eye, then target) for older pag
 rewritten (with `history.replaceState`) on the first still frame after the camera moves. Other URL
 parameters and the hash are preserved; pages add their own through the `link.app` hook.
 
+## Omniverse Kit
+
+`kit/exts/lhzn.vantagekit` brings the same navigation ideas to Omniverse Kit viewers
+(Kit 109 and 110, Isaac Sim 6). It is a Kit extension with a pure-Python core:
+
+- **Modes.**
+  - **free:** Kit's own navigation.
+  - **chase:** behind the target along its heading, with the horizon level.
+  - **pov:** fixed in the target's body frame.
+  - **orbit:** around the target, from mouse drag, the wheel, the right stick and the triggers.
+- **Any stage.** The rig reads the stage up axis (Y or Z) and meters per unit. Every distance is
+  set in meters and every time constant in seconds, and the smoothing does not depend on frame
+  rate.
+- **Handover.** In the attached modes the rig locks its camera against Kit's mouse and keyboard
+  navigation with the camera's `omni:kit:cameraLock` attribute, and turns off native gamepad
+  navigation. It changes these only when the mode changes, and restores them on dispose.
+- **Bindings as data.** Bindings are records with press, hold, axis and delta kinds and exact
+  modifiers. They sit in ordered layers, so an app layer (vessel controls, for example) can take
+  the sticks from the camera while it is on. `help_rows()` lists them for a help panel.
+
+| Action | Keyboard / mouse | Gamepad |
+|---|---|---|
+| Attach the camera to the selected target, or free it | K | X |
+| Next attached view: chase, point of view, orbit | T | D-pad down |
+| Previous / next target | [ / ] | LB / RB |
+| Home view | Home | A |
+| Orbit (orbit view) | left drag, wheel | right stick, triggers |
+
+```python
+from vantagekit.core import CallbackTargets, Pose
+from vantagekit.kit import ViewerControls, on_update
+
+controls = ViewerControls(
+    "/World/ViewerCam",
+    CallbackTargets(ids=lambda: sorted(poses), pose=lambda i: Pose(*poses[i]) if i in poses else None),
+)
+sub = on_update(controls.update, "my.viewer")   # controls.update(dt) once per frame
+...
+sub = None
+controls.dispose()                               # unsubscribes and restores navigation
+```
+
+Add `kit/exts` to the app's extension search paths (`--ext-folder`, or
+`[settings.app.exts.folders]` in a `.kit` file) and depend on `"lhzn.vantagekit" = {}`. Its
+Python package is `vantagekit`.
+
 ## Development
 
 ```
 npm install
 npm test                       # Node, no GPU or browser needed
+(cd kit && python3 -m pytest)  # Kit core: Python 3.10+, pytest, no Kit needed
 python3 -m http.server 8000    # then open http://localhost:8000/demo/
 ```
 
