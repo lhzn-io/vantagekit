@@ -13,6 +13,7 @@ actions. Apps add handlers for their own actions and their own binding layers.
 from __future__ import annotations
 
 import math
+import time
 from typing import Callable, Dict, Iterable, List, Sequence
 
 import carb
@@ -21,6 +22,7 @@ from ..core.bindings import DEFAULT_BINDINGS, Binding, BindingState, Frame
 from ..core.targets import TargetCycler, TargetProvider
 from .input import InputRouter
 from .native_nav import NativeNavigation
+from .overlay import NAMES, ViewOverlay
 from .rig import CameraRig, RigSettings
 
 # Orbit input scales: a drag across the whole window turns half a circle; a wheel step
@@ -44,8 +46,17 @@ class ViewerControls:
         order: int = 0,
         consume: bool = False,
         name: str = "vantagekit",
+        overlay: bool = True,
+        overlay_extra: Callable[[], str] | None = None,
     ):
+        """overlay: draw the view badge over the viewport (an app with its own HUD can turn
+        it off and draw view_badge() itself). overlay_extra: returns text the app appends
+        to the badge title (for example "PILOT" while piloting)."""
         self.name = name
+        self._overlay_on = overlay
+        self._overlay = None
+        self._overlay_retry_t = 0.0
+        self._overlay_extra = overlay_extra
         self.targets = TargetCycler(provider)
         self.native = NativeNavigation(free_gamepad=free_gamepad)
         self.rig = CameraRig(camera_path, self.targets, settings, self.native, name=name)
@@ -120,13 +131,55 @@ class ViewerControls:
             d_yaw = -frame.value("orbit_yaw") * DRAG_RAD_PER_WINDOW
             d_yaw -= frame.amount("orbit_yaw_rate", STICK_RAD_PER_S)
             d_elev = frame.value("orbit_pitch") * DRAG_RAD_PER_WINDOW
-            d_elev -= frame.amount("orbit_pitch_rate", STICK_RAD_PER_S)
+            d_elev += frame.amount("orbit_pitch_rate", STICK_RAD_PER_S)  # stick up: camera up
             log_r = -frame.value("orbit_range") * WHEEL_LOG_STEP
             log_r += frame.amount("orbit_range_rate", TRIGGER_LOG_PER_S)
             if d_yaw or d_elev or log_r:
                 self.rig.orbit_by(d_yaw, d_elev, math.exp(log_r))
         self.rig.update(dt)
+        self._update_overlay()
         return frame
+
+    _HINTS = {
+        "free": "K / X: attach",
+        "chase": "T / D-pad down: next view    Home / A: reset view",
+        "pov": "T / D-pad down: next view",
+        "orbit": "Right stick, drag: orbit    Triggers, wheel: distance    "
+        "T / D-pad down: chase from here    Home / A: reset",
+    }
+
+    def view_badge(self) -> tuple:
+        """(mode, title, hint) for the current view, e.g. ("orbit", "ORBIT  101", "Right
+        stick, drag: orbit ..."). The built-in overlay draws it; an app with its own HUD
+        can pass overlay=False and draw this at the top of its panel instead. COLORS in
+        vantagekit.kit.overlay holds the color per mode."""
+        mode = self.rig.mode
+        title = NAMES.get(mode, mode.upper())
+        if self.rig.attached and self.targets.selected is not None:
+            title += f"  {self.targets.selected}"
+        if self._overlay_extra is not None:
+            try:
+                extra = self._overlay_extra()
+            except Exception:
+                extra = ""
+            if extra:
+                title += f"  {extra}"
+        return mode, title, self._HINTS.get(mode, "")
+
+    def _update_overlay(self) -> None:
+        if not self._overlay_on:
+            return
+        if self._overlay is None:
+            # the viewport window may not exist yet at startup: try about once a second
+            now = time.monotonic()
+            if now < self._overlay_retry_t:
+                return
+            self._overlay_retry_t = now + 1.0
+            self._overlay = ViewOverlay(f"{self.name}.view")
+            if not self._overlay.ready:
+                self._overlay = None
+                return
+        self._overlay.show(*self.view_badge())
 
     def on_stage_opened(self) -> None:
         self.rig.reset_stage()
@@ -136,6 +189,9 @@ class ViewerControls:
         return self.state.table()
 
     def dispose(self) -> None:
+        if self._overlay is not None:
+            self._overlay.destroy()
+            self._overlay = None
         self.router.dispose()
         self.rig.dispose()
         self._handlers.clear()

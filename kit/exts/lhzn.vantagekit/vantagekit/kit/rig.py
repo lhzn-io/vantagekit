@@ -17,9 +17,16 @@ import carb
 import omni.usd
 from pxr import Gf, Usd, UsdGeom
 
-from ..core.frame import UpFrame, Vec3
-from ..core.rig_math import chase_view, look_at_matrix, orbit_eye, orbit_from_eye, pov_view
-from ..core.smoothing import Smoothed3, SmoothedAngle
+from ..core.frame import UpFrame, Vec3, add, scale
+from ..core.rig_math import (
+    chase_orbit_view,
+    chase_perspective,
+    look_at_matrix,
+    orbit_eye,
+    orbit_from_eye,
+    pov_view,
+)
+from ..core.smoothing import Smoothed3, SmoothedAngle, wrap_angle
 from ..core.targets import TargetCycler
 from .native_nav import NativeNavigation
 
@@ -30,11 +37,12 @@ MODES = ("free", "chase", "pov", "orbit")
 class RigSettings:
     views: Tuple[str, ...] = ("chase", "pov", "orbit")
     body_forward: Optional[Sequence[float]] = None  # target's forward axis; None: +Z (Y up), +X (Z up)
-    # chase: behind and above, horizon level
+    # chase: the default perspective, behind and above, horizon level. The camera looks
+    # at the pivot chase_look_up_m above the target; orbit turns around the same pivot,
+    # and leaving orbit for chase keeps the perspective set there.
     chase_back_m: float = 12.5
     chase_up_m: float = 1.8
     chase_look_up_m: float = 1.8
-    chase_look_ahead_m: float = 0.0
     chase_tau_target_s: float = 0.05
     chase_tau_heading_s: float = 0.35
     # point of view: fixed in the target's body frame
@@ -77,7 +85,14 @@ class CameraRig:
         self.orbit_yaw = 0.0
         self.orbit_elevation = math.radians(self.settings.orbit_elevation_deg)
         self.orbit_range_m = self.settings.orbit_range_m
+        # Chase perspective, relative to the target's heading: (yaw, elevation, meters).
+        # Leaving orbit for chase keeps the perspective set in orbit; home() resets it.
+        self.chase_yaw_rel, self.chase_elevation, self.chase_range_m = self.default_chase()
         self.home_view: Optional[Tuple[Vec3, Vec3]] = None  # free-mode home (eye, look)
+
+    def default_chase(self) -> Tuple[float, float, float]:
+        s = self.settings
+        return chase_perspective(s.chase_back_m, s.chase_up_m, s.chase_look_up_m)
 
     # stage ----------------------------------------------------------------------
     @property
@@ -137,7 +152,7 @@ class CameraRig:
                 self._prepare_op(prim)
                 self._activate_camera()
             self.view = mode
-            self._enter(mode)
+            self._enter(mode, self.mode)
         self.mode = mode
         self.native.set_native(mode == "free", stage, self.camera_path)
         carb.log_info(f"[{self.name}] camera mode {mode} (target {self.targets.selected})")
@@ -146,38 +161,56 @@ class CameraRig:
     def step_target(self, direction: int):
         return self.targets.step(direction)
 
-    def _enter(self, mode: str) -> None:
+    def _pivot(self, target: Sequence[float]) -> Vec3:
+        """Chase and orbit both turn around this point above the target, so switching
+        between them does not move the camera."""
+        f = self.frame
+        return add(target, scale(f.up, f.to_units(self.settings.chase_look_up_m)))
+
+    def _enter(self, mode: str, prev: str) -> None:
         s = self.settings
         pose = self.targets.pose()
         if pose is None:
             return
+        # Keep the smoothed target and heading when moving between attached views
+        if prev == "free" or self._target.value is None:
+            self._target.snap(pose.position)
+            h = self.frame.heading(pose.orientation)
+            self._last_heading = h if h is not None else self._last_heading
+            self._heading.snap(self._last_heading)
         self._target.tau = s.orbit_tau_target_s if mode == "orbit" else s.chase_tau_target_s
-        self._target.snap(pose.position)
-        h = self.frame.heading(pose.orientation)
-        self._last_heading = h if h is not None else self._last_heading
-        self._heading.snap(self._last_heading)
+        heading = self._heading.value if self._heading.value is not None else self._last_heading
         if mode == "orbit":
-            eye = self.eye()
-            if eye is not None:
-                yaw, elev, dist = orbit_from_eye(pose.position, eye, self.frame)
-                self.orbit_yaw = yaw
-                self._set_elevation(elev)
-                self._set_range_m(dist * self.frame.meters_per_unit)
+            if prev == "chase":
+                # start the orbit exactly where the chase camera is
+                self.orbit_yaw = heading + self.chase_yaw_rel
+                self._set_elevation(self.chase_elevation)
+                self._set_range_m(self.chase_range_m)
+            else:
+                eye = self.eye()
+                if eye is not None:
+                    yaw, elev, dist = orbit_from_eye(self._pivot(self._target.value), eye, self.frame)
+                    self.orbit_yaw = yaw
+                    self._set_elevation(elev)
+                    self._set_range_m(dist * self.frame.meters_per_unit)
+        elif mode == "chase" and prev == "orbit":
+            # keep the perspective set in orbit, now turning with the target's heading
+            self.chase_yaw_rel = wrap_angle(self.orbit_yaw - heading)
+            self.chase_elevation = self.orbit_elevation
+            self.chase_range_m = self.orbit_range_m
 
     def home(self) -> None:
-        """Attached: back to the default orbit behind the target, or snap the chase.
-        Free: the saved home view, if any."""
+        """Attached: back to the default chase perspective (behind the target), in chase
+        and in orbit. Free: the saved home view, if any."""
         if not self.attached:
             if self.home_view is not None:
                 self.place(*self.home_view)
             return
-        self.orbit_yaw = self._last_heading + math.pi
-        self.orbit_elevation = math.radians(self.settings.orbit_elevation_deg)
-        self.orbit_range_m = self.settings.orbit_range_m
-        pose = self.targets.pose()
-        if pose is not None:
-            self._target.snap(pose.position)
-            self._heading.snap(self._last_heading)
+        self.chase_yaw_rel, self.chase_elevation, self.chase_range_m = self.default_chase()
+        heading = self._heading.value if self._heading.value is not None else self._last_heading
+        self.orbit_yaw = heading + self.chase_yaw_rel
+        self._set_elevation(self.chase_elevation)
+        self._set_range_m(self.chase_range_m)
 
     # orbit input ------------------------------------------------------------------
     def _set_elevation(self, e: float) -> None:
@@ -207,15 +240,15 @@ class CameraRig:
         if h is not None:
             self._last_heading = h
         target = self._target.update(pose.position, dt)
+        heading = self._heading.update(self._last_heading, dt)
         if self.mode == "chase":
-            heading = self._heading.update(self._last_heading, dt)
-            eye, look, up = chase_view(
+            eye, look, up = chase_orbit_view(
                 target,
                 heading,
-                f.to_units(s.chase_back_m),
-                f.to_units(s.chase_up_m),
+                self.chase_yaw_rel,
+                self.chase_elevation,
+                f.to_units(self.chase_range_m),
                 f.to_units(s.chase_look_up_m),
-                f.to_units(s.chase_look_ahead_m),
                 f,
             )
         elif self.mode == "pov":
@@ -228,8 +261,8 @@ class CameraRig:
                 f,
             )
         else:  # orbit
-            eye = orbit_eye(target, self.orbit_yaw, self.orbit_elevation, f.to_units(self.orbit_range_m), f)
-            look, up = target, f.up
+            look, up = self._pivot(target), f.up
+            eye = orbit_eye(look, self.orbit_yaw, self.orbit_elevation, f.to_units(self.orbit_range_m), f)
         return self._write(look_at_matrix(eye, look, up))
 
     def place(self, eye: Sequence[float], look: Sequence[float]) -> bool:
@@ -295,6 +328,11 @@ class CameraRig:
                 "yaw_deg": math.degrees(self.orbit_yaw),
                 "elevation_deg": math.degrees(self.orbit_elevation),
                 "range_m": self.orbit_range_m,
+            },
+            "chase": {
+                "yaw_rel_deg": math.degrees(self.chase_yaw_rel),
+                "elevation_deg": math.degrees(self.chase_elevation),
+                "range_m": self.chase_range_m,
             },
         }
 

@@ -4,6 +4,8 @@ import pytest
 
 from vantagekit.core.frame import UpFrame, dot, length, quat_from_axis_angle, sub
 from vantagekit.core.rig_math import (
+    chase_orbit_view,
+    chase_perspective,
     chase_view,
     look_at_matrix,
     orbit_eye,
@@ -89,6 +91,34 @@ def test_chase_follows_heading(axis):
     eye, _, _ = chase_view((0, 0, 0), math.pi / 2, back=10.0, up=0.0, look_up=0.0, look_ahead=0.0, frame=f)
     # heading +90 deg points along h2, so the eye sits at -h2
     assert eye == approx3(tuple(-10.0 * c for c in f.h2))
+
+
+@pytest.mark.parametrize("axis", ["Y", "Z"])
+@pytest.mark.parametrize("back,up,look_up", [(12.5, 1.8, 1.8), (10.0, 4.0, 1.0), (6.0, 0.5, 2.0)])
+def test_chase_perspective_reproduces_chase_view(axis, back, up, look_up):
+    f = FRAMES[axis]
+    target, heading = (3.0, 4.0, -5.0), 0.7
+    yaw_rel, elev, dist = chase_perspective(back, up, look_up)
+    eye, look, upv = chase_orbit_view(target, heading, yaw_rel, elev, dist, look_up, f)
+    eye0, look0, _ = chase_view(target, heading, back, up, look_up, 0.0, f)
+    assert eye == approx3(eye0)
+    assert look == approx3(look0)
+    assert upv == f.up
+
+
+@pytest.mark.parametrize("axis", ["Y", "Z"])
+def test_chase_orbit_turns_with_heading(axis):
+    f = FRAMES[axis]
+    # A perspective set off the starboard quarter stays there when the target turns
+    for heading in (0.0, 1.0, -2.5):
+        eye, look, _ = chase_orbit_view((0, 0, 0), heading, math.radians(-120), 0.3, 20.0, 0.0, f)
+        yaw, elev, dist = orbit_from_eye(look, eye, f)
+        assert wrap(yaw - heading) == pytest.approx(math.radians(-120), abs=1e-9)
+        assert (elev, dist) == pytest.approx((0.3, 20.0))
+
+
+def wrap(a):
+    return math.atan2(math.sin(a), math.cos(a))
 
 
 @pytest.mark.parametrize("axis", ["Y", "Z"])

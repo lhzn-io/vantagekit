@@ -57,6 +57,34 @@ def chase_view(
     return eye, look, frame.up
 
 
+def chase_perspective(back: float, up: float, look_up: float) -> Tuple[float, float, float]:
+    """The chase_view placement as a heading-relative orbit around the pivot
+    (target + look_up along up): (yaw relative to heading, elevation, distance).
+
+    Chase and orbit then share one parameterization, so a perspective chosen in orbit
+    can be kept for chase: chase_orbit_view with these values gives chase_view's camera
+    (with look_ahead 0).
+    """
+    rise = up - look_up
+    return math.pi, math.atan2(rise, back), math.hypot(back, rise)
+
+
+def chase_orbit_view(
+    target: Sequence[float],
+    heading: float,
+    yaw_rel: float,
+    elevation: float,
+    distance: float,
+    look_up: float,
+    frame: UpFrame,
+) -> Tuple[Vec3, Vec3, Vec3]:
+    """(eye, look point, up vector) on an orbit around target + look_up that turns with
+    the target's heading; the horizon stays level."""
+    pivot = add(target, scale(frame.up, look_up))
+    eye = orbit_eye(pivot, heading + yaw_rel, elevation, distance, frame)
+    return eye, pivot, frame.up
+
+
 def pov_view(
     target: Sequence[float],
     q: Sequence[float],
