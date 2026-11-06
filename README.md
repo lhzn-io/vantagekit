@@ -23,8 +23,9 @@ writes for itself:
   speed in metres per second, independent of frame rate. An Xbox-style controller (standard
   mapping) moves, looks around, switches mode and resets the view.
 - **Touch in both modes.** Orbit gestures follow the mouse preset (one finger does what the left
-  button does; pinch zooms). In fly mode one finger looks around, two fingers move like a stick and
-  pinching sets the speed.
+  button does; pinch zooms by the finger ratio, as on a map). In fly mode one finger looks around,
+  two fingers move like a stick (or an optional on-screen joystick moves) and pinching sets the
+  speed.
 - **Scale and exaggeration aware.** Speeds and links are expressed in metres, whatever the scene
   unit and the vertical exaggeration.
 - **Framing helpers.** `fitBox`, `placeView` (bearing, elevation, distance), `saveHome` and `home`,
@@ -45,7 +46,7 @@ copy of three.js however it loads it. The MapLibre adapter (`vantagekit-maplibre
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.4.0/vantagekit-three.js"
+    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.5.0/vantagekit-three.js"
   }
 }
 </script>
@@ -99,7 +100,8 @@ the same distance, so the view does not jump. `modes: ['fly']` gives a fly-only 
 | Right stick | rotate around the orbit point | look from where you are |
 | Triggers, LB/RB, stick click, A | down and up, speed steps, x4, home | the same |
 | One finger | rotate (`rotate-left`) or pan (`pan-left`) | look around |
-| Two fingers | pinch zooms; dragging pans (`rotate-left`) or rotates and tilts (`pan-left`) | drag moves like a stick held away from where it began; pinch sets the speed |
+| Two fingers | pinch zooms by the finger ratio; dragging pans (`rotate-left`) or rotates and tilts (`pan-left`) | drag moves like a stick held away from where it began; pinch sets the speed |
+| On-screen joystick (optional) | | moves, like WASD; any other touch looks |
 
 Fly speed per second is a fraction (`speed.rangeFactor`, 0.5) of your height above the surface
 when the page supplies `surfaceAt(x, z)` (scene units in and out), so low passes are slow and high
@@ -119,9 +121,8 @@ reaches it. Held keys are released when focus leaves. `keys: false` turns the ke
 
 ## Phones and tablets
 
-On a phone, fly mode works better than orbit: one-finger look and two-finger move respond
-directly, while orbit's pinch zoom feels slow (a known issue, below). A page offering both modes
-can start phones in fly:
+On a phone, fly mode suits exploring: one-finger look and two-finger move (or the joystick)
+respond directly. A page offering both modes can start phones in fly:
 
 ```js
 const touchFirst = matchMedia('(pointer: coarse)').matches;
@@ -129,6 +130,21 @@ createVantage({ ...options, modes: ['orbit', 'fly'], mode: touchFirst ? 'fly' : 
 ```
 
 The demo does this.
+
+### Joystick
+
+`fly: { joystick: 'left' }` (or `'right'`) draws a move stick in the bottom corner of the viewer
+in fly mode. Pushing it moves like WASD (with the fly response curve); every other touch on the
+scene looks around, so one thumb steers while the other looks. With the stick shown, a two-finger
+drag no longer moves, and a pinch still sets the speed. `setJoystick('left' | 'right' | null)`
+changes it at run time, and with `settingsKey` the choice is remembered with the other fly
+settings. The stick is an absolutely positioned element added to the viewer element's parent
+(made `position: relative` if it was static), placed clear of the screen's safe-area insets;
+`fly.joystickSize` sets its diameter (120 CSS px), and `fly.joystickCurve` its response (the
+power applied to the push: 1 is linear, 2, the default from `fly.curve`, leaves more room for slow
+moves near the centre). It shows only in fly mode while the controller is enabled. A page that offers it on touch devices only can pass
+`joystick: matchMedia('(pointer: coarse)').matches ? 'left' : null`. The demo starts phones with
+the stick on the left; its panel moves it or turns it off.
 
 Touch works without page code: vantagekit sets `touch-action: none` on the canvas, so drags do not
 scroll the page. Pass `touches` (camera-controls touch actions) to choose other orbit gestures.
@@ -141,16 +157,17 @@ aspect before framing. For battery and frame rate, cap the renderer's pixel rati
 (`renderer.setPixelRatio(Math.min(devicePixelRatio, 2))`). `touchBindings` lists the gestures for
 a help panel.
 
-Known issue: on a real phone, orbit's pinch zoom responds slowly. The likely causes are
-camera-controls' pinch dolly rate and the orbit smoothing (`smoothTime`, 0.25 s) adding up; a fix
-needs testing on devices.
+Orbit pinch zoom follows the fingers: spreading them to twice their distance halves the distance
+to the orbit point, as on a map. (camera-controls on its own zooms by the change in finger spread
+in pixels, measured from the fingers' midpoint, which on a phone came to about half the finger
+ratio.) `pinchFollowsFingers: false` keeps camera-controls' own rate.
 
 ## MapLibre
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script type="module">
-import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.4.0/vantagekit-maplibre.js';
+import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.5.0/vantagekit-maplibre.js';
 
 map.on('load', () => {
   const nav = createMapVantage({ maplibregl, map, fly: { minAltitude: 2 } });
@@ -193,7 +210,8 @@ in the MapLibre adapter yet.
 | `fitBox(box3, { bearingDeg, elevationDeg, factor })` | Frame a bounding box |
 | `saveHome()`, `home(animate)` | Remember and return to a view (Home key, pad A), in either mode |
 | `setMode(mode)`, `mode`, `modes` | Switch between the page's modes; the current and offered modes |
-| `stepFlySpeed(steps)`, `turn(rightDeg, upDeg)`, `setFlySettings(partial)` | Fly speed, look and settings from your own controls |
+| `stepFlySpeed(steps)`, `setFlySpeed(multiplier)`, `flySpeed`, `turn(rightDeg, upDeg)`, `setFlySettings(partial)` | Fly speed, look and settings from your own controls |
+| `setJoystick(side)`, `joystick` | Show the fly mode on-screen stick bottom `left` or `right`, or remove it (`null`) |
 | `setSurface(fn)` | Set the surface height lookup used for fly speed |
 | `rescaleVertical(prev, next, anchorY)` | Keep a point steady when the exaggeration changes |
 | `view()`, `setView(view, animate)` | Renderer-neutral view state |
@@ -205,7 +223,7 @@ in the MapLibre adapter yet.
 
 Events: `move`, `rest`, `input` (`mouse`, `touch`, `keyboard` or `gamepad`), `gamepad` (connected or
 disconnected), `link` (URL rewritten), `modechange`, `speed` (fly speed multiplier changed),
-`recover` (a non-finite camera was reset to the last good view).
+`recover` (a non-finite camera was reset to the last good view), `joystick` (side changed).
 
 ## View links
 

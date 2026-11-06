@@ -24,7 +24,7 @@ function make(opts = {}) {
 }
 
 test('module loads without a GPU or DOM', () => {
-  assert.equal(VERSION, '0.4.0');
+  assert.equal(VERSION, '0.5.0');
   const v = make();
   assert.ok(v.controls);
   v.dispose();
@@ -421,6 +421,56 @@ test('fly touch: one finger looks, two fingers move, pinch steps speed', () => {
   v._touchUp(touchEv(1)); v._touchUp(touchEv(2));
   assert.equal(v._touchMove.y, 0);
   assert.equal(v._gesture, null);
+  v.dispose();
+});
+
+test('orbit pinch zooms by the finger ratio', () => {
+  const v = make();
+  assert.equal(v.controls.dollySpeed, 1);
+  v._flyPointerDown(touchEv(1, 100, 100));
+  assert.equal(v.controls.dollySpeed, 1);             // one finger: the wheel's speed
+  v._flyPointerDown(touchEv(2, 100, 300));
+  // camera-controls scales the distance by 0.95^(-dSpan * dollySpeed / 8), span being half the
+  // finger separation; a small spread from 200 px to 202 px should scale it by about 200 / 202.
+  const s = v.controls.dollySpeed;
+  close(0.95 ** (-(-1 / 8) * s), 200 / 202, 1e-4);
+  v._touchPointerMove(touchEv(2, 100, 500));           // fingers 400 px apart: half the speed
+  close(v.controls.dollySpeed, s / 2, 1e-9);
+  v._touchUp(touchEv(2));
+  assert.equal(v.controls.dollySpeed, 1);
+  v._touchUp(touchEv(1));
+  const off = make({ pinchFollowsFingers: false });
+  off._flyPointerDown(touchEv(1, 100, 100)); off._flyPointerDown(touchEv(2, 100, 300));
+  assert.equal(off.controls.dollySpeed, 1);
+  v.dispose(); off.dispose();
+});
+
+test('fly joystick: side setting, help rows, and the stick moves like WASD', () => {
+  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 }, fly: { accelTime: 0.001, curve: 1 } });
+  assert.equal(v.joystick, null);
+  assert.throws(() => v.setJoystick('top'), /joystick/);
+  v.setJoystick('right');
+  assert.equal(v.joystick, 'right');
+  const rows = v.touchBindings;
+  assert.equal(rows[0].gesture, 'Joystick');
+  assert.equal(rows.find((r) => r.gesture === 'Two-finger drag').fly, undefined);
+  v.setLookAt([0, 10, 0], [0, 10, -10]);
+  v._stick.x = 0; v._stick.y = 0.5;                   // what a half push up on the stick sets
+  const z0 = v.getPosition().z;
+  run(v, 1);
+  close(z0 - v.getPosition().z, 5, 0.2);
+  v.setFlySettings({ joystickCurve: 2 });             // a half push now gives a quarter speed
+  v.setLookAt([0, 10, 0], [0, 10, -10]);
+  const z1 = v.getPosition().z;
+  run(v, 1);
+  close(z1 - v.getPosition().z, 2.5, 0.2);
+  assert.equal(v.setFlySpeed(2), 2);
+  assert.equal(v.flySpeed, 2);
+  assert.equal(v.setFlySpeed(1000), 32);
+  v.setMode('orbit');
+  assert.equal(v._stick.y, 0);                        // leaving fly lets go of the stick
+  v.setJoystick(null);
+  assert.equal(v.touchBindings[0].gesture, 'One-finger drag');
   v.dispose();
 });
 

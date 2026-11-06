@@ -24,9 +24,16 @@ const FLY_DEFAULTS = {
   pointerLock: true,   // capture the pointer for mouse look; drag to look without it
   touchSensitivity: 0.25,  // degrees of turn per pixel of one-finger drag
   touchStickPx: 60,    // two-finger drag distance (CSS px) that counts as full stick deflection
+  joystick: null,      // on-screen move stick for touch: 'left', 'right' or null (none)
+  joystickSize: 120,   // stick diameter in CSS px
+  joystickCurve: null, // stick response curve power; null uses `curve` (1 is linear, higher is finer near the centre)
 };
-const SETTING_KEYS = ['sensitivity', 'invertY', 'curve', 'touchSensitivity'];
+const SETTING_KEYS = ['sensitivity', 'invertY', 'curve', 'touchSensitivity', 'joystick', 'joystickCurve'];
 const PINCH_STEP = 1.25;   // finger spread ratio per fly speed step
+// camera-controls zooms a pinch by 0.95^(-dSpan * dollySpeed / 8), where span is the distance from
+// the fingers' midpoint to one finger (half their separation). A dollySpeed of PINCH_K / separation
+// makes the view distance follow the finger ratio: fingers twice as far apart, half the distance.
+const PINCH_K = 16 / -Math.log(0.95);
 
 function isEditable(t) {
   return !!t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName || ''));
@@ -48,7 +55,9 @@ const clamp1 = (v) => Math.max(-1, Math.min(1, v));
  * @param {HTMLElement} [o.dom] element that receives mouse and touch input (omit in tests)
  * @param {Array<'orbit'|'fly'>} [o.modes=['orbit','fly']] modes the page offers; one entry fixes it
  * @param {'orbit'|'fly'} [o.mode] starting mode (default: the first of `modes`)
- * @param {object} [o.fly] fly mode settings: sensitivity, invertY, curve, padLookDeg, accelTime, pointerLock
+ * @param {object} [o.fly] fly mode settings: sensitivity, invertY, curve, padLookDeg, accelTime, pointerLock,
+ *   joystick ('left' | 'right' | null: an on-screen move stick in fly mode), joystickSize
+ * @param {boolean} [o.pinchFollowsFingers=true] orbit pinch zooms by the finger ratio, as on a map
  * @param {string} [o.settingsKey] localStorage key to remember the viewer's fly settings
  * @param {Function} [o.surfaceAt] (x, z) -> surface height in scene units, or null; scales fly speed by height above it
  * @param {{lon:number,lat:number}} [o.origin] scene origin, enables geographic links
@@ -138,6 +147,9 @@ export class Vantage extends EventTarget {
     c.maxDistance = o.maxDistance ?? Infinity;
     c.maxPolarAngle = o.maxPolarAngle ?? Math.PI * 0.85;
     c.smoothTime = o.smoothTime ?? 0.25;
+    this._pinchFingers = o.pinchFollowsFingers ?? true;
+    this._dollySpeed = c.dollySpeed;   // the wheel's; a two-finger orbit gesture sets its own
+    this._orbitTouch = new Map();
 
     this.mode = 'orbit';
     this._enabled = true;
@@ -165,6 +177,11 @@ export class Vantage extends EventTarget {
     this._gesture = null;
     this._touchMove = { x: 0, y: 0 };
     this._pointerType = 'mouse';
+    // On-screen joystick: its element (built when first shown), the pointer holding it, and its
+    // deflection (x right, y forward, inside the unit circle).
+    this._stickEl = null;
+    this._stickPointer = null;
+    this._stick = { x: 0, y: 0 };
 
     this._onControlStart = () => this._setInput(this._pointerType === 'touch' ? 'touch' : 'mouse');
     this._onRest = () => this._emit('rest');
@@ -205,6 +222,7 @@ export class Vantage extends EventTarget {
       this._on(this.dom, 'wheel', (e) => this._flyWheel(e), { passive: false });
     }
     if (start === 'fly') this.setMode('fly', { lock: false });
+    this._syncStick();
   }
 
   // ---- input -------------------------------------------------------------------------------
@@ -314,14 +332,31 @@ export class Vantage extends EventTarget {
   }
 
   _flyPointerDown(e) {
+    if (this.mode === 'orbit' && e.pointerType === 'touch') {
+      this._orbitTouch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this._orbitPinchSpeed();
+      return;
+    }
     if (this.mode !== 'fly' || !this._enabled) return;
     if (e.pointerType === 'touch') { this._touchDown(e); return; }
     if (this.fly.pointerLock && !this._fly.locked) this._requestLock();
     if (e.button === 0) this._fly.dragging = true;
   }
 
+  // Orbit pinch: camera-controls' own pinch zoom scales with the change in finger separation in
+  // pixels, about half the finger ratio for a typical phone pinch. Setting its dollySpeed from the
+  // separation before each move (this listener runs before camera-controls', which is on the
+  // document) makes the zoom follow the fingers, as on a map.
+  _orbitPinchSpeed() {
+    const c = this.controls;
+    if (!this._pinchFingers || this._orbitTouch.size !== 2) { c.dollySpeed = this._dollySpeed; return; }
+    const [a, b] = [...this._orbitTouch.values()];
+    c.dollySpeed = PINCH_K / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+  }
+
   // Fly mode touch: one finger looks around; two fingers move like a stick held away from where
-  // they first touched, and pinching steps the speed (spreading is faster).
+  // they first touched, and pinching steps the speed (spreading is faster). With the on-screen
+  // joystick shown, the stick moves and two fingers only pinch for speed.
 
   _touchDown(e) {
     this._touch.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -342,6 +377,12 @@ export class Vantage extends EventTarget {
   }
 
   _touchPointerMove(e) {
+    const ot = this._orbitTouch.get(e.pointerId);
+    if (ot) {
+      ot.x = e.clientX; ot.y = e.clientY;
+      this._orbitPinchSpeed();
+      return;
+    }
     const prev = this._touch.get(e.pointerId);
     if (!prev || this.mode !== 'fly' || !this._enabled) return;
     const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
@@ -353,9 +394,11 @@ export class Vantage extends EventTarget {
       this.turn(dx * s, -dy * s * (this.fly.invertY ? -1 : 1));
     } else {
       const [a, b] = [...this._touch.values()];
-      const px = this.fly.touchStickPx;
-      this._touchMove.x = clamp1(((a.x + b.x) / 2 - g.cx) / px);
-      this._touchMove.y = clamp1(-((a.y + b.y) / 2 - g.cy) / px);
+      if (!this._stickShown()) {
+        const px = this.fly.touchStickPx;
+        this._touchMove.x = clamp1(((a.x + b.x) / 2 - g.cx) / px);
+        this._touchMove.y = clamp1(-((a.y + b.y) / 2 - g.cy) / px);
+      }
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (g.dRef > 0) {
         while (d > g.dRef * PINCH_STEP) { this.stepFlySpeed(1); g.dRef *= PINCH_STEP; }
@@ -367,14 +410,141 @@ export class Vantage extends EventTarget {
   }
 
   _touchUp(e) {
+    if (e && this._orbitTouch.delete(e.pointerId)) { this._orbitPinchSpeed(); return; }
     if (!e || !this._touch.delete(e.pointerId)) return;
     this._touchGestureStart();
   }
 
   _touchClear() {
     this._touch.clear();
+    this._orbitTouch.clear();
+    this.controls.dollySpeed = this._dollySpeed;
     this._gesture = null;
     this._touchMove.x = this._touchMove.y = 0;
+    this._stickRelease();
+  }
+
+  // ---- on-screen joystick ------------------------------------------------------------------
+
+  /** The joystick side ('left' or 'right'), or null when there is none. */
+  get joystick() {
+    return this.fly.joystick || null;
+  }
+
+  /** Show the fly mode joystick at the bottom 'left' or 'right' of the viewer, or remove it (null). */
+  setJoystick(side) {
+    if (side != null && side !== 'left' && side !== 'right') throw new Error(`vantagekit: joystick must be 'left', 'right' or null`);
+    this.setFlySettings({ joystick: side || null });
+    this._syncStick();
+    this._emit('joystick', { side: side || null });
+  }
+
+  _stickShown() {
+    return !!this._stickEl && this._stickEl.style.display !== 'none';
+  }
+
+  // Shown in fly mode while enabled; it sits over the viewer, in the viewer element's parent.
+  _syncStick() {
+    const side = this.joystick;
+    const want = !!side && this.mode === 'fly' && this._enabled && !!this.dom;
+    if (!want) {
+      this._stickRelease();
+      if (this._stickEl) this._stickEl.style.display = 'none';
+      return;
+    }
+    if (!this._stickEl) this._buildStick();
+    if (!this._stickEl) return;
+    const s = this._stickEl.style;
+    const gap = 'calc(20px + env(safe-area-inset-bottom, 0px))';
+    s.display = 'block';
+    s.bottom = gap;
+    s.left = side === 'left' ? 'calc(20px + env(safe-area-inset-left, 0px))' : '';
+    s.right = side === 'right' ? 'calc(20px + env(safe-area-inset-right, 0px))' : '';
+  }
+
+  _buildStick() {
+    const parent = this.dom.parentElement;
+    if (!parent || typeof document === 'undefined' || !document.createElementNS) return;
+    if (typeof getComputedStyle !== 'undefined' && getComputedStyle(parent).position === 'static') {
+      parent.style.position = 'relative';
+    }
+    const size = this.fly.joystickSize;
+    const r = size / 2;
+    const NS = 'http://www.w3.org/2000/svg';
+    const el = document.createElement('div');
+    el.className = 'vantagekit-joystick';
+    el.setAttribute('aria-hidden', 'true');
+    Object.assign(el.style, {
+      position: 'absolute', width: `${size}px`, height: `${size}px`, zIndex: '10',
+      touchAction: 'none', userSelect: 'none', webkitUserSelect: 'none', cursor: 'grab',
+    });
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', `${-r} ${-r} ${size} ${size}`);
+    svg.setAttribute('width', size);
+    svg.setAttribute('height', size);
+    svg.style.display = 'block';
+    svg.style.overflow = 'visible';
+    const circle = (cr, attrs) => {
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('r', cr);
+      for (const [k, v] of Object.entries(attrs)) c.setAttribute(k, v);
+      return c;
+    };
+    // A dark halo under each white line keeps the stick visible over light and dark scenes.
+    svg.append(
+      circle(r - 2, { fill: 'rgba(0,0,0,0.18)', stroke: 'rgba(0,0,0,0.35)', 'stroke-width': 4 }),
+      circle(r - 2, { fill: 'none', stroke: 'rgba(255,255,255,0.6)', 'stroke-width': 1.5 }),
+    );
+    const knob = document.createElementNS(NS, 'g');
+    knob.append(
+      circle(r * 0.42, { fill: 'rgba(255,255,255,0.32)', stroke: 'rgba(0,0,0,0.35)', 'stroke-width': 3 }),
+      circle(r * 0.42, { fill: 'none', stroke: 'rgba(255,255,255,0.8)', 'stroke-width': 1.5 }),
+    );
+    svg.append(knob);
+    el.append(svg);
+    parent.append(el);
+    this._stickEl = el;
+    this._stickKnob = knob;
+    this._on(el, 'pointerdown', (e) => this._stickDown(e));
+    this._on(el, 'pointermove', (e) => this._stickMove(e));
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      this._on(el, t, (e) => { if (e.pointerId === this._stickPointer) this._stickRelease(); });
+    }
+    this._on(el, 'contextmenu', (e) => e.preventDefault());
+  }
+
+  _stickDown(e) {
+    if (this._stickPointer != null || this.mode !== 'fly' || !this._enabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this._stickPointer = e.pointerId;
+    try { this._stickEl.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    this._setInput(e.pointerType === 'touch' ? 'touch' : 'mouse');
+    this._stickMove(e);
+  }
+
+  _stickMove(e) {
+    if (e.pointerId !== this._stickPointer) return;
+    e.preventDefault();
+    const rect = this._stickEl.getBoundingClientRect();
+    // full deflection when the knob's centre reaches the ring
+    const reach = (rect.width / 2) * 0.58;
+    let x = (e.clientX - (rect.left + rect.width / 2)) / reach;
+    let y = (e.clientY - (rect.top + rect.height / 2)) / reach;
+    const len = Math.hypot(x, y);
+    if (len > 1) { x /= len; y /= len; }
+    this._stick.x = x;
+    this._stick.y = -y;
+    if (this._stickKnob) this._stickKnob.setAttribute('transform', `translate(${x * reach} ${y * reach})`);
+  }
+
+  _stickRelease() {
+    if (this._stickPointer != null && this._stickEl) {
+      try { this._stickEl.releasePointerCapture(this._stickPointer); } catch { /* already released */ }
+    }
+    this._stickPointer = null;
+    this._stick.x = this._stick.y = 0;
+    if (this._stickKnob) this._stickKnob.setAttribute('transform', '');
   }
 
   /**
@@ -385,15 +555,17 @@ export class Vantage extends EventTarget {
     const orbit = this.modes.includes('orbit') && !this._customTouches;
     const fly = this.modes.includes('fly');
     const rot = this.mousePreset === 'rotate-left';
+    const stick = !!this.joystick;
     const rows = [
+      ...(stick ? [{ gesture: 'Joystick', fly: 'move' }] : []),
       { gesture: 'One-finger drag', orbit: rot ? 'rotate' : 'pan', fly: 'look around' },
       { gesture: 'Pinch', orbit: 'zoom toward the fingers', fly: 'speed (spread is faster)' },
-      { gesture: 'Two-finger drag', orbit: rot ? 'pan' : 'rotate and tilt', fly: 'move, like a stick held away from where it began' },
+      { gesture: 'Two-finger drag', orbit: rot ? 'pan' : 'rotate and tilt', fly: stick ? undefined : 'move, like a stick held away from where it began' },
     ];
     return rows.map((r) => ({
       gesture: r.gesture,
-      ...(orbit ? { orbit: r.orbit } : {}),
-      ...(fly ? { fly: r.fly } : {}),
+      ...(orbit && r.orbit ? { orbit: r.orbit } : {}),
+      ...(fly && r.fly ? { fly: r.fly } : {}),
     })).filter((r) => r.orbit || r.fly);
   }
 
@@ -412,8 +584,19 @@ export class Vantage extends EventTarget {
 
   /** Change the fly speed multiplier by steps of 1.25x (positive is faster). */
   stepFlySpeed(steps) {
+    return this.setFlySpeed(this._fly.speedMul * 1.25 ** steps);
+  }
+
+  /** The fly speed multiplier (the wheel's and the pinch's), 1/32 to 32. */
+  get flySpeed() {
+    return this._fly.speedMul;
+  }
+
+  /** Set the fly speed multiplier directly, for a speed control on the page. */
+  setFlySpeed(multiplier) {
     const f = this._fly;
-    f.speedMul = Math.min(32, Math.max(1 / 32, f.speedMul * 1.25 ** steps));
+    if (!(multiplier > 0)) return f.speedMul;
+    f.speedMul = Math.min(32, Math.max(1 / 32, multiplier));
     this._emit('speed', { multiplier: f.speedMul });
     return f.speedMul;
   }
@@ -539,8 +722,9 @@ export class Vantage extends EventTarget {
         sprint = p.sprint;
       }
       if (this.mode === 'fly') {
-        x += applyCurve(this._touchMove.x, this.fly.curve);
-        y += applyCurve(this._touchMove.y, this.fly.curve);
+        const sc = this.fly.joystickCurve ?? this.fly.curve;
+        x += applyCurve(this._touchMove.x, this.fly.curve) + applyCurve(this._stick.x, sc);
+        y += applyCurve(this._touchMove.y, this.fly.curve) + applyCurve(this._stick.y, sc);
       }
       x = clamp1(x); y = clamp1(y); z = clamp1(z);
     }
@@ -600,6 +784,7 @@ export class Vantage extends EventTarget {
     const target = this.getTarget();
     if (mode === 'fly') {
       this.controls.enabled = false;
+      this._touchClear();
       this.mode = 'fly';
       this._fly.vel.set(0, 0, 0);
       this.setLookAt(eye, target);
@@ -616,6 +801,7 @@ export class Vantage extends EventTarget {
       this.controls.update(0);
     }
     this._linkDirty = true;
+    this._syncStick();
     this._emit('modechange', { mode });
   }
 
@@ -706,6 +892,7 @@ export class Vantage extends EventTarget {
     this._enabled = !!on;
     this.controls.enabled = !!on && this.mode === 'orbit';
     if (!on) { this._held.clear(); this._fly.dragging = false; this._touchClear(); }
+    this._syncStick();
   }
 
   /** Change the scene origin (for example when a new dataset loads). */
@@ -826,5 +1013,6 @@ export class Vantage extends EventTarget {
     this.controls.removeEventListener('controlstart', this._onControlStart);
     this.controls.removeEventListener('rest', this._onRest);
     this.controls.dispose();
+    if (this._stickEl) { this._stickEl.remove(); this._stickEl = null; }
   }
 }
