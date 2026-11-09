@@ -67,6 +67,10 @@ class InputRouter:
                     self._pad_inputs[inp] = (enum, None)
         self._pads = []
         self._drag_from = None
+        # Optional callable: mouse events count only while it returns True. carb input is
+        # app-wide, so a viewer with its own pop-up (a second view with its own orbit) sets
+        # this to ignore drags and the wheel while the pointer is over that pop-up.
+        self.mouse_gate = None
         self._sub = self._input.subscribe_to_input_events(self._on_event, order=order)
         self._pad_sub = self._input.subscribe_to_gamepad_connection_events(self._on_pad)
 
@@ -103,6 +107,9 @@ class InputRouter:
         return not (self._consume and self.state.claims(inp))
 
     def _on_mouse(self, e) -> bool:
+        if self.mouse_gate is not None and not self.mouse_gate():
+            self._drag_from = None  # a drag that wanders into the pop-up ends there
+            return True
         t = e.type
         mt = carb.input.MouseEventType
         claimed = False

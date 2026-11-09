@@ -263,6 +263,9 @@ parameters and the hash are preserved; pages add their own through the `link.app
 - **Bindings as data.** Bindings are records with press, hold, axis and delta kinds and exact
   modifiers. They sit in ordered layers, so an app layer (vessel controls, for example) can take
   the sticks from the camera while it is on. `help_rows()` lists them for a help panel.
+- **Pop-ups with their own view.** Input comes from carb for the whole app, so a drag in another
+  window would also move the camera. Set `controls.router.mouse_gate` to a function that
+  returns False while the pointer is over such a window; the mouse is ignored then.
 
 | Action | Keyboard / mouse | Gamepad |
 |---|---|---|
