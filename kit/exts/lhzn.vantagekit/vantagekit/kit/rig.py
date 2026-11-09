@@ -180,9 +180,18 @@ class CameraRig:
             self._heading.snap(self._last_heading)
         self._target.tau = s.orbit_tau_target_s if mode == "orbit" else s.chase_tau_target_s
         heading = self._heading.value if self._heading.value is not None else self._last_heading
+        # Chase and orbit share one vantage (angle from the heading, elevation, range).
+        # Point of view is a fixed seat on the target and never changes it, so chase, pov,
+        # orbit returns to the chase vantage instead of orbiting from the seat's eye (which
+        # started the orbit a few meters out, 2026-11-08).
+        if prev == "orbit" and mode in ("chase", "pov"):
+            # keep the perspective set in orbit, now turning with the target's heading
+            self.chase_yaw_rel = wrap_angle(self.orbit_yaw - heading)
+            self.chase_elevation = self.orbit_elevation
+            self.chase_range_m = self.orbit_range_m
         if mode == "orbit":
-            if prev == "chase":
-                # start the orbit exactly where the chase camera is
+            if prev in ("chase", "pov"):
+                # start the orbit at the chase vantage
                 self.orbit_yaw = heading + self.chase_yaw_rel
                 self._set_elevation(self.chase_elevation)
                 self._set_range_m(self.chase_range_m)
@@ -193,11 +202,6 @@ class CameraRig:
                     self.orbit_yaw = yaw
                     self._set_elevation(elev)
                     self._set_range_m(dist * self.frame.meters_per_unit)
-        elif mode == "chase" and prev == "orbit":
-            # keep the perspective set in orbit, now turning with the target's heading
-            self.chase_yaw_rel = wrap_angle(self.orbit_yaw - heading)
-            self.chase_elevation = self.orbit_elevation
-            self.chase_range_m = self.orbit_range_m
 
     def home(self) -> None:
         """Attached: back to the default chase perspective (behind the target), in chase

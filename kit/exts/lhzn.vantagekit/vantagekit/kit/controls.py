@@ -129,7 +129,10 @@ class ViewerControls:
                     carb.log_error(f"[{self.name}] action {action} failed: {e}")
         if self.rig.mode == "orbit":
             d_yaw = -frame.value("orbit_yaw") * DRAG_RAD_PER_WINDOW
-            d_yaw -= frame.amount("orbit_yaw_rate", STICK_RAD_PER_S)
+            # The stick moves the camera the way it is pushed: left takes the camera left
+            # around the target (a positive yaw moves it right on screen), up raises it.
+            # The mouse drags the scene instead, so its signs are the opposite.
+            d_yaw += frame.amount("orbit_yaw_rate", STICK_RAD_PER_S)
             d_elev = frame.value("orbit_pitch") * DRAG_RAD_PER_WINDOW
             d_elev += frame.amount("orbit_pitch_rate", STICK_RAD_PER_S)  # stick up: camera up
             log_r = -frame.value("orbit_range") * WHEEL_LOG_STEP

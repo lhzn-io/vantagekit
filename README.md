@@ -249,6 +249,11 @@ parameters and the hash are preserved; pages add their own through the `link.app
   - **chase:** behind the target along its heading, with the horizon level.
   - **pov:** fixed in the target's body frame.
   - **orbit:** around the target, from mouse drag, the wheel, the right stick and the triggers.
+    The stick moves the camera the way it is pushed (left takes it left around the target, up
+    raises it); a mouse drag moves the scene.
+
+  Chase and orbit share one vantage: leaving orbit keeps its angle, elevation and range for
+  chase, and the point of view (a fixed seat) never changes it.
 - **Any stage.** The rig reads the stage up axis (Y or Z) and meters per unit. Every distance is
   set in meters and every time constant in seconds, and the smoothing does not depend on frame
   rate.
