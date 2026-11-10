@@ -75,6 +75,11 @@ const clamp1 = (v) => Math.max(-1, Math.min(1, v));
  * @param {boolean|'focus'} [o.keys=true] keyboard input: true listens on the page, 'focus' only
  *   while the viewer element has focus (it gets tabindex 0 and takes focus on a click or tap)
  * @param {boolean} [o.gamepad=true]
+ * @param {'map'|'object'} [o.pad='map'] orbit gamepad mapping: 'map' moves the orbit point with the
+ *   left stick and the triggers (a terrain explorer); 'object' turns with both sticks and zooms
+ *   with the triggers (a viewer of one object). Fly mode is the same for both.
+ * @param {number} [o.padZoomRate=1.2] 'object' trigger zoom: full trigger scales the distance by
+ *   exp(-rate) per second
  * @param {{mps?:number, rangeFactor?:number, minMps?:number}} [o.speed] fixed m/s, or a fraction of the view range (orbit) or height (fly) per second
  * @param {boolean|{app?:{read?:Function,write?:Function}}} [o.link=false] keep the camera in the URL
  */
@@ -99,6 +104,9 @@ export class Vantage extends EventTarget {
     this._keyMap = keyMap(this._bindings);
     this.speed = { mps: null, rangeFactor: 0.5, minMps: 0.5, ...(o.speed || {}) };
     this.lookRateDeg = o.lookRateDeg ?? 90;
+    if (o.pad != null && o.pad !== 'map' && o.pad !== 'object') throw new Error(`vantagekit: pad must be 'map' or 'object'`);
+    this.padMapping = o.pad ?? 'map';
+    this.padZoomRate = o.padZoomRate ?? 1.2;
     this.deadzone = o.deadzone ?? 0.15;
     this.maxDt = o.maxDt ?? 0.1;
     this.surfaceAt = o.surfaceAt || null;
@@ -710,11 +718,18 @@ export class Vantage extends EventTarget {
     if (this._held.size && typeof document !== 'undefined' && document.hasFocus && !document.hasFocus()) {
       this._held.clear();
     }
-    let x = 0, y = 0, z = 0, factor = 1, yaw = 0, pitch = 0, sprint = false;
+    let x = 0, y = 0, z = 0, factor = 1, yaw = 0, pitch = 0, sprint = false, padDolly = 0;
     if (this._enabled) {
       ({ x, y, z, factor } = keyIntents(this._held));
       const p = this._pollPad();
-      if (p) {
+      if (p && this.padMapping === 'object' && this.mode === 'orbit') {
+        // Object viewer: both sticks turn around the orbit point (the left stick with the right
+        // stick's signs) and the triggers zoom (right in, left out). The keys still move.
+        yaw = clamp1(p.yaw + p.x);
+        pitch = clamp1(p.pitch - p.y);
+        padDolly = p.z;
+        sprint = p.sprint;
+      } else if (p) {
         const curve = this.mode === 'fly' ? this.fly.curve : 1;
         x += applyCurve(p.x, curve); y += applyCurve(p.y, curve); z += p.z;
         yaw = p.yaw; pitch = p.pitch;
@@ -743,6 +758,13 @@ export class Vantage extends EventTarget {
       if ((yaw || pitch) && step > 0) {
         const r = this.lookRateDeg * D2R * step;
         c.rotate(yaw * r, pitch * r, false);
+        moved = true;
+      }
+      if (padDolly && step > 0) {
+        // Exponential, so full trigger multiplies the distance by exp(-padZoomRate) per second
+        // whatever the scale; the speed step buttons and the stick click scale it.
+        const k = padDolly * this.padZoomRate * this._padStep * (sprint ? 4 : 1) * step;
+        c.dolly(c.distance * (1 - Math.exp(-k)), false);
         moved = true;
       }
       moved = c.update(step) || moved;

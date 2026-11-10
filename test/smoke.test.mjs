@@ -474,6 +474,48 @@ test('fly joystick: side setting, help rows, and the stick moves like WASD', () 
   v.dispose();
 });
 
+test("pad: 'object' turns with both sticks and zooms with the triggers; 'map' moves the orbit point", () => {
+  // a standard-mapping pad stub: axes lx, ly, rx, ry; buttons 6 (LT) and 7 (RT)
+  const pad = { id: 'stub', connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ value: 0, pressed: false })) };
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { value: { getGamepads: () => [pad] }, configurable: true });
+  try {
+    assert.throws(() => make({ pad: 'hull' }), /pad must be/);
+    // object-scale settings, as a page showing a 7 m hull would pass them
+    const obj = make({ gamepad: true, pad: 'object', metresPerUnit: 1, dollyToCursor: false, infinityDolly: false, minDistance: 2, maxDistance: 80 });
+    obj.setLookAt([0, 0, 20], [0, 0, 0]);
+    obj.update(0);
+    const az0 = obj.controls.azimuthAngle, t0 = obj.getTarget().toArray();
+    pad.axes = [1, 0, 0, 0];                            // left stick right: turn, not pan
+    run(obj, 1);
+    close(Math.abs(obj.controls.azimuthAngle - az0), Math.PI / 2, 0.05);   // 90 deg/s
+    assert.deepEqual(obj.getTarget().toArray().map((v) => +v.toFixed(6)), t0.map((v) => +v.toFixed(6)));
+    pad.axes = [0, 0, 0, 0];
+    const d0 = obj.controls.distance;
+    pad.buttons[7] = { value: 1, pressed: true };       // right trigger: zoom in
+    run(obj, 1);
+    close(obj.controls.distance / d0, Math.exp(-1.2), 0.02);
+    pad.buttons[7] = { value: 0, pressed: false };
+    pad.buttons[6] = { value: 1, pressed: true };       // left trigger: zoom out by the same factor
+    run(obj, 1);
+    close(obj.controls.distance / d0, 1, 0.03);
+    pad.buttons[6] = { value: 0, pressed: false };
+    obj.dispose();
+
+    const map = make({ gamepad: true, metresPerUnit: 1 });
+    map.setLookAt([0, 0, 20], [0, 0, 0]);
+    map.update(0);
+    const m0 = map.getTarget().x;
+    pad.axes = [1, 0, 0, 0];                            // the default still pans with the left stick
+    run(map, 1);
+    assert.ok(map.getTarget().x - m0 > 1);
+    pad.axes = [0, 0, 0, 0];
+    map.dispose();
+  } finally {
+    if (had) Object.defineProperty(globalThis, 'navigator', had); else delete globalThis.navigator;
+  }
+});
+
 test('stick response curve', () => {
   assert.equal(applyCurve(0.5, 2), 0.25);
   assert.equal(applyCurve(-0.5, 2), -0.25);
