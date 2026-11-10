@@ -1,0 +1,62 @@
+name: Publish to PyPI
+
+# Pushing a tag vX.Y.Z builds the Python package (vantagekit.core and vantagekit.kit) and publishes it
+# to PyPI through trusted publishing (OIDC): no API token is stored anywhere. PyPI must list this
+# repository, this workflow file and the `pypi` environment as a trusted publisher for vantagekit.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Check the tag matches every version string
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          init=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' kit/exts/lhzn.vantagekit/vantagekit/__init__.py)
+          js=$(sed -n "s/^export const VERSION = '\(.*\)';$/\1/p" vantagekit.js)
+          if [ "v$version" != "$GITHUB_REF_NAME" ] || [ "$init" != "$version" ] || [ "$js" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME, pyproject.toml $version, __version__ $init and vantagekit.js $js must agree" >&2
+            exit 1
+          fi
+
+      - name: Test the core
+        run: cd kit && uvx pytest -q
+
+      - name: Build
+        run: uv build
+
+      - name: Check the distributions
+        run: uvx twine check --strict dist/*
+
+      - name: Import the core from the built wheel
+        run: |
+          uv venv /tmp/wheel-check
+          uv pip install --python /tmp/wheel-check dist/*.whl
+          /tmp/wheel-check/bin/python -c 'import vantagekit, vantagekit.core as c; print(vantagekit.__version__, len(c.__all__))'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vantagekit
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

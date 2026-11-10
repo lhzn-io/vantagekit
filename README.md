@@ -46,7 +46,7 @@ copy of three.js however it loads it. The MapLibre adapter (`vantagekit-maplibre
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.6.0/vantagekit-three.js"
+    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.6.1/vantagekit-three.js"
   }
 }
 </script>
@@ -188,7 +188,7 @@ ratio.) `pinchFollowsFingers: false` keeps camera-controls' own rate.
 ```html
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script type="module">
-import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.6.0/vantagekit-maplibre.js';
+import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.6.1/vantagekit-maplibre.js';
 
 map.on('load', () => {
   const nav = createMapVantage({ maplibregl, map, fly: { minAltitude: 2 } });
@@ -310,7 +310,8 @@ sub = None
 controls.dispose()                               # unsubscribes and restores navigation
 ```
 
-Add `kit/exts` to the app's extension search paths (`--ext-folder`, or
+The Python package is also on PyPI (`pip install vantagekit`), for code outside Kit that uses
+the core, such as tests and tools; see [kit/README.md](kit/README.md). Add `kit/exts` to the app's extension search paths (`--ext-folder`, or
 `[settings.app.exts.folders]` in a `.kit` file) and depend on `"lhzn.vantagekit" = {}`. Its
 Python package is `vantagekit`.
 

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The Python package: vantagekit.core (standard library only) and vantagekit.kit (Omniverse Kit
+# adapters, which import only inside Kit). Kit itself loads the package as the extension in
+# kit/exts/lhzn.vantagekit; the wheel lets code outside Kit (tests, tools, other viewers) pin the core.
+# The JavaScript modules at the root are served from the tagged repository, not from this package.
+[project]
+name = "vantagekit"
+version = "0.6.1"
+description = "Camera and input controls for viewers of terrain, ocean and vessel scenes: orbit, chase and point-of-view camera math, frame-rate independent smoothing, and bindings as data, with Omniverse Kit adapters."
+readme = "kit/README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Long Horizon Observatory", email = "dfry@lhzn.io" }]
+keywords = ["camera", "navigation", "input", "gamepad", "viewer", "omniverse"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics :: 3D Rendering",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = []
+
+[project.urls]
+Demo = "https://lhzn-io.github.io/vantagekit/demo/"
+Issues = "https://github.com/lhzn-io/vantagekit/issues"
+Source = "https://github.com/lhzn-io/vantagekit"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kit/exts/lhzn.vantagekit/vantagekit"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "kit/exts/lhzn.vantagekit/vantagekit",
+  "kit/tests",
+  "kit/README.md",
+  "LICENSE",
+  "pyproject.toml",
+]
