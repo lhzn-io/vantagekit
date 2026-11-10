@@ -4,11 +4,11 @@
 // three.js and camera-controls are passed in, never imported, so a page keeps a single copy of
 // three.js whatever way it loads it (importmap, dynamic import, or a vendored file).
 //
-// Copyright (c) 2026 Long Horizon Observatory. MIT licence.
+// Copyright (c) 2026 Long Horizon Observatory. MIT license.
 
 import {
   DEFAULT_BINDINGS, keyMap, keyIntents, padIntents, applyCurve, localFrame,
-  eyeOffset, orbitFromOffset, encodeCam, decodeCam,
+  eyeOffset, orbitFromOffset, encodeCam, decodeCam, renamed,
 } from './vantagekit.js';
 
 export * from './vantagekit.js';
@@ -26,7 +26,7 @@ const FLY_DEFAULTS = {
   touchStickPx: 60,    // two-finger drag distance (CSS px) that counts as full stick deflection
   joystick: null,      // on-screen move stick for touch: 'left', 'right' or null (none)
   joystickSize: 120,   // stick diameter in CSS px
-  joystickCurve: null, // stick response curve power; null uses `curve` (1 is linear, higher is finer near the centre)
+  joystickCurve: null, // stick response curve power; null uses `curve` (1 is linear, higher is finer near the center)
 };
 const SETTING_KEYS = ['sensitivity', 'invertY', 'curve', 'touchSensitivity', 'joystick', 'joystickCurve'];
 const PINCH_STEP = 1.25;   // finger spread ratio per fly speed step
@@ -62,7 +62,7 @@ const clamp1 = (v) => Math.max(-1, Math.min(1, v));
  * @param {Function} [o.surfaceAt] (x, z) -> surface height in scene units, or null; scales fly speed by height above it
  * @param {{lon:number,lat:number}} [o.origin] scene origin, enables geographic links
  * @param {string} [o.axes] axis convention, 'x-east,y-up,-z-north'
- * @param {number} [o.metresPerUnit=1] metres per scene unit
+ * @param {number} [o.metersPerUnit=1] meters per scene unit
  * @param {number|Function} [o.exaggeration=1] vertical exaggeration, or a getter read when needed
  * @param {'rotate-left'|'pan-left'} [o.mouse='rotate-left'] orbit mouse button preset
  * @param {'screen'|'ground'} [o.pan='screen'] orbit pan in the screen plane or along the ground
@@ -96,10 +96,11 @@ export class Vantage extends EventTarget {
     this.THREE = THREE;
     this.camera = camera;
     this.dom = o.dom || null;
-    this.metresPerUnit = o.metresPerUnit ?? 1;
+    if (o.metersPerUnit == null && o.metresPerUnit != null) renamed('the metresPerUnit option', 'metersPerUnit');
+    this.metersPerUnit = o.metersPerUnit ?? o.metresPerUnit ?? 1;
     this._axes = o.axes;
     this._exag = typeof o.exaggeration === 'function' ? o.exaggeration : () => o.exaggeration ?? 1;
-    this.frame = o.origin ? localFrame({ origin: o.origin, metresPerUnit: this.metresPerUnit, axes: o.axes }) : null;
+    this.frame = o.origin ? localFrame({ origin: o.origin, metersPerUnit: this.metersPerUnit, axes: o.axes }) : null;
     this._bindings = o.bindings ?? DEFAULT_BINDINGS;
     this._keyMap = keyMap(this._bindings);
     this.speed = { mps: null, rangeFactor: 0.5, minMps: 0.5, ...(o.speed || {}) };
@@ -158,7 +159,7 @@ export class Vantage extends EventTarget {
     };
     this.pivotMode = 'free';
     if (o.pivot != null) this.setPivot(o.pivot, { emit: false });
-    c.minDistance = o.minDistance ?? 10 / this.metresPerUnit;
+    c.minDistance = o.minDistance ?? 10 / this.metersPerUnit;
     c.maxDistance = o.maxDistance ?? Infinity;
     c.maxPolarAngle = o.maxPolarAngle ?? Math.PI * 0.85;
     c.smoothTime = o.smoothTime ?? 0.25;
@@ -634,7 +635,7 @@ export class Vantage extends EventTarget {
     if (e.pointerId !== this._stickPointer) return;
     e.preventDefault();
     const rect = this._stickEl.getBoundingClientRect();
-    // full deflection when the knob's centre reaches the ring
+    // full deflection when the knob's center reaches the ring
     const reach = (rect.width / 2) * 0.58;
     let x = (e.clientX - (rect.left + rect.width / 2)) / reach;
     let y = (e.clientY - (rect.top + rect.height / 2)) / reach;
@@ -760,14 +761,14 @@ export class Vantage extends EventTarget {
     this.camera.updateMatrixWorld();
   }
 
-  /** Fly speed in metres per second before key, pad and wheel multipliers. */
+  /** Fly speed in meters per second before key, pad and wheel multipliers. */
   _flyBaseMps() {
     if (this.speed.mps != null) return this.speed.mps;
     const f = this._fly;
-    let heightM = f.ref * this.metresPerUnit;
+    let heightM = f.ref * this.metersPerUnit;
     if (this.surfaceAt) {
       const s = this.surfaceAt(f.pos.x, f.pos.z);
-      if (Number.isFinite(s)) heightM = Math.abs(f.pos.y - s) * this.metresPerUnit;
+      if (Number.isFinite(s)) heightM = Math.abs(f.pos.y - s) * this.metersPerUnit;
     }
     return Math.max(this.speed.minMps, this.speed.rangeFactor * heightM);
   }
@@ -785,7 +786,7 @@ export class Vantage extends EventTarget {
     dir.y += z;
     if (dir.lengthSq() > 1) dir.normalize();
     const mps = this._flyBaseMps() * factor * f.speedMul * (sprint ? 4 : 1);
-    const want = dir.multiplyScalar(mps / this.metresPerUnit);
+    const want = dir.multiplyScalar(mps / this.metersPerUnit);
     // Ease toward the wanted velocity: about 95 % after accelTime seconds.
     const k = step > 0 ? 1 - Math.exp(-step / Math.max(1e-3, this.fly.accelTime / 3)) : 0;
     f.vel.lerp(want, k);
@@ -800,9 +801,9 @@ export class Vantage extends EventTarget {
 
   // ---- frame loop --------------------------------------------------------------------------
 
-  /** Distance from the eye to the orbit point (orbit) or the point ahead (fly), in rendered metres. */
-  rangeMetres() {
-    return (this.mode === 'fly' ? this._fly.ref : this.controls.distance) * this.metresPerUnit;
+  /** Distance from the eye to the orbit point (orbit) or the point ahead (fly), in rendered meters. */
+  rangeMeters() {
+    return (this.mode === 'fly' ? this._fly.ref : this.controls.distance) * this.metersPerUnit;
   }
 
   /**
@@ -858,8 +859,8 @@ export class Vantage extends EventTarget {
       moved = this._updateFly(step, x, y, z, factor, yaw, pitch, sprint);
     } else {
       if ((x || y || z) && step > 0) {
-        const mps = this.speed.mps ?? Math.max(this.speed.minMps, this.speed.rangeFactor * this.rangeMetres());
-        const d = (mps * factor * (sprint ? 4 : 1) * step) / this.metresPerUnit;
+        const mps = this.speed.mps ?? Math.max(this.speed.minMps, this.speed.rangeFactor * this.rangeMeters());
+        const d = (mps * factor * (sprint ? 4 : 1) * step) / this.metersPerUnit;
         this.camera.updateMatrix();
         if (x) c.truck(x * d, 0, false);
         if (y) c.forward(y * d, false);
@@ -1032,7 +1033,7 @@ export class Vantage extends EventTarget {
 
   /** Change the scene origin (for example when a new dataset loads). */
   setOrigin(origin) {
-    this.frame = origin ? localFrame({ origin, metresPerUnit: this.metresPerUnit, axes: this._axes }) : null;
+    this.frame = origin ? localFrame({ origin, metersPerUnit: this.metersPerUnit, axes: this._axes }) : null;
   }
 
   /** Set or clear the surface height lookup used for fly speed: (x, z) -> scene y, or null. */
@@ -1048,23 +1049,45 @@ export class Vantage extends EventTarget {
     const fovDeg = this.camera.getEffectiveFOV ? this.camera.getEffectiveFOV() : this.camera.fov;
     const heightPx = (this.dom && this.dom.clientHeight) || 1;
     const viewHeight = 2 * range * Math.tan((fovDeg * D2R) / 2);
-    return {
+    const info = {
       eye, target, range, mode: this.mode,
-      rangeMetres: range * this.metresPerUnit,
-      metresPerPixelAtTarget: (viewHeight * this.metresPerUnit) / heightPx,
+      rangeMeters: range * this.metersPerUnit,
+      metersPerPixelAtTarget: (viewHeight * this.metersPerUnit) / heightPx,
       fovDeg,
       exaggeration: this._exag(),
-      metresPerUnit: this.metresPerUnit,
+      metersPerUnit: this.metersPerUnit,
       flySpeedMultiplier: this._fly.speedMul,
     };
+    // the 0.7 names, until 0.9.0 (not enumerable, so they stay out of logs and spreads)
+    for (const [old, now] of [['rangeMetres', 'rangeMeters'], ['metresPerPixelAtTarget', 'metersPerPixelAtTarget'], ['metresPerUnit', 'metersPerUnit']]) {
+      Object.defineProperty(info, old, { get() { renamed(`viewInfo().${old}`, now); return info[now]; } });
+    }
+    return info;
+  }
+
+  /** @deprecated 0.8.0: use rangeMeters(); removed in 0.9.0. */
+  rangeMetres() {
+    renamed('rangeMetres()', 'rangeMeters()');
+    return this.rangeMeters();
+  }
+
+  /** @deprecated 0.8.0: use metersPerUnit; removed in 0.9.0. */
+  get metresPerUnit() {
+    renamed('metresPerUnit', 'metersPerUnit');
+    return this.metersPerUnit;
+  }
+
+  set metresPerUnit(v) {
+    renamed('metresPerUnit', 'metersPerUnit');
+    this.metersPerUnit = v;
   }
 
   // ---- view state and links ----------------------------------------------------------------
 
-  /** Current view: geographic when an origin is set, otherwise local metres. */
+  /** Current view: geographic when an origin is set, otherwise local meters. */
   view() {
     const exag = this._exag();
-    const m = this.metresPerUnit;
+    const m = this.metersPerUnit;
     const t = this.getTarget();
     const e = this.getPosition();
     const orbit = orbitFromOffset({ e: (e.x - t.x) * m, n: -(e.z - t.z) * m, u: (e.y - t.y) * m });
@@ -1078,7 +1101,7 @@ export class Vantage extends EventTarget {
   /** Move to a view from view(). Geographic views need an origin. */
   setView(v, animate = false) {
     const exag = this._exag();
-    const m = this.metresPerUnit;
+    const m = this.metersPerUnit;
     let tgt;
     if (Number.isFinite(v.lon)) {
       if (!this.frame) return false;

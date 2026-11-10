@@ -42,24 +42,37 @@ export function easeAngleDeg(a, b, k) {
 
 const SUPPORTED_AXES = 'x-east,y-up,-z-north';
 
+const warnedNames = new Set();
+/**
+ * Note once that an old API name was used. The British-spelled names (metresPerUnit, rangeMetres,
+ * metresPerPixelAtTarget) were renamed in 0.8.0 and still work until 0.9.0.
+ */
+export function renamed(oldName, newName) {
+  if (warnedNames.has(oldName)) return;
+  warnedNames.add(oldName);
+  if (typeof console !== 'undefined') console.warn(`vantagekit: ${oldName} is renamed ${newName}; the old name goes in 0.9.0`);
+}
+
 /**
  * Equirectangular local frame about an origin.
  *
  * Scene axes are x east, y up, -z north (three.js convention for map-like scenes). Heights in
- * the scene are multiplied by the vertical exaggeration; geographic heights are true metres.
+ * the scene are multiplied by the vertical exaggeration; geographic heights are true meters.
  *
- * @param {{origin:{lon:number,lat:number}, metresPerUnit?:number, axes?:string}} opts
+ * @param {{origin:{lon:number,lat:number}, metersPerUnit?:number, axes?:string}} opts
  */
-export function localFrame({ origin, metresPerUnit = 1, axes = SUPPORTED_AXES }) {
+export function localFrame({ origin, metersPerUnit, metresPerUnit, axes = SUPPORTED_AXES }) {
   if (axes !== SUPPORTED_AXES) throw new Error(`vantagekit: axes '${axes}' not supported (use '${SUPPORTED_AXES}')`);
   if (!origin || !Number.isFinite(origin.lon) || !Number.isFinite(origin.lat)) {
     throw new Error('vantagekit: localFrame needs origin {lon, lat}');
   }
-  const mpu = metresPerUnit;
+  if (metersPerUnit == null && metresPerUnit != null) renamed('localFrame metresPerUnit', 'metersPerUnit');
+  const mpu = metersPerUnit ?? metresPerUnit ?? 1;
   const cosLat = Math.cos(origin.lat * D2R);
   return {
     origin: { lon: origin.lon, lat: origin.lat },
-    metresPerUnit: mpu,
+    metersPerUnit: mpu,
+    get metresPerUnit() { renamed('frame.metresPerUnit', 'metersPerUnit'); return mpu; },
     /** Geographic point to scene coordinates [x, y, z]. */
     toScene(lon, lat, h = 0, exag = 1) {
       return [
@@ -84,12 +97,12 @@ export function localFrame({ origin, metresPerUnit = 1, axes = SUPPORTED_AXES })
 // ---------------------------------------------------------------------------------------------
 //
 // A view is { lon, lat, h, range, bearing, pitch } (or { e, n, h, ... } in the local frame):
-// the orbit target, its true height in metres, the eye-to-target distance in rendered metres,
+// the orbit target, its true height in meters, the eye-to-target distance in rendered meters,
 // and the look direction in MapLibre conventions: bearing clockwise from north, pitch 0 looking
 // straight down and 90 at the horizon.
 
 /**
- * Eye offset from the target in rendered east/north/up metres for a range, bearing and pitch.
+ * Eye offset from the target in rendered east/north/up meters for a range, bearing and pitch.
  * @returns {{e:number,n:number,u:number}}
  */
 export function eyeOffset(range, bearingDeg, pitchDeg) {
@@ -100,7 +113,7 @@ export function eyeOffset(range, bearingDeg, pitchDeg) {
 }
 
 /**
- * Range, bearing and pitch from an eye offset (eye minus target) in east/north/up metres.
+ * Range, bearing and pitch from an eye offset (eye minus target) in east/north/up meters.
  * @returns {{range:number,bearing:number,pitch:number}}
  */
 export function orbitFromOffset({ e, n, u }) {

@@ -5,10 +5,10 @@
 // maplibregl and the map are passed in, never imported, so the page keeps its own copy.
 // Tested against MapLibre GL JS 4.7.
 //
-// Copyright (c) 2026 Long Horizon Observatory. MIT licence.
+// Copyright (c) 2026 Long Horizon Observatory. MIT license.
 
 import {
-  DEFAULT_BINDINGS, keyMap, keyIntents, padIntents, applyCurve, wrapDeg, DEG_TO_M,
+  DEFAULT_BINDINGS, keyMap, keyIntents, padIntents, applyCurve, wrapDeg, DEG_TO_M, renamed,
 } from './vantagekit.js';
 
 export * from './vantagekit.js';
@@ -21,7 +21,7 @@ const FLY_DEFAULTS = {
   curve: 2,            // stick response curve power (1 is linear)
   padLookDeg: 120,     // right-stick turn rate at full deflection, degrees per second
   accelTime: 0.15,     // seconds to reach about 95 % of the target speed
-  minAltitude: null,   // metres; the eye stays at or above this (null lets it go anywhere)
+  minAltitude: null,   // meters; the eye stays at or above this (null lets it go anywhere)
 };
 // The map's own handlers, switched off in fly mode and restored after.
 const HANDLERS = ['dragPan', 'dragRotate', 'scrollZoom', 'touchZoomRotate', 'touchPitch', 'doubleClickZoom', 'boxZoom', 'keyboard'];
@@ -32,13 +32,13 @@ function isEditable(t) {
 }
 const clamp1 = (v) => Math.max(-1, Math.min(1, v));
 
-/** A point moved east and north by metres (equirectangular, fine over a frame's step). */
+/** A point moved east and north by meters (equirectangular, fine over a frame's step). */
 export function offsetLngLat(lng, lat, eastM, northM) {
   return [lng + eastM / (DEG_TO_M * Math.cos(lat * D2R)), lat + northM / DEG_TO_M];
 }
 
 /**
- * Distance in metres from the camera to the map centre for a MapLibre zoom, at a latitude, for a
+ * Distance in meters from the camera to the map center for a MapLibre zoom, at a latitude, for a
  * viewport height in CSS pixels and a vertical field of view in degrees (MapLibre's default 36.87).
  */
 export function rangeForZoom(zoom, lat, heightPx, fovDeg = 36.87, tileSize = 512) {
@@ -47,7 +47,7 @@ export function rangeForZoom(zoom, lat, heightPx, fovDeg = 36.87, tileSize = 512
 }
 
 /**
- * The eye of a map view: the centre (with its rendered elevation), the distance to it, bearing and
+ * The eye of a map view: the center (with its rendered elevation), the distance to it, bearing and
  * pitch (MapLibre conventions) to { lng, lat, alt, bearing, elev }, elev being degrees above the
  * horizon (-90 straight down).
  */
@@ -299,10 +299,16 @@ export class MapVantage extends EventTarget {
     return tr && Number.isFinite(tr.fov) ? tr.fov : 36.87;
   }
 
-  /** Distance from the camera to the map centre, in rendered metres. */
-  rangeMetres() {
+  /** Distance from the camera to the map center, in rendered meters. */
+  rangeMeters() {
     const c = this.map.getCenter();
     return rangeForZoom(this.map.getZoom(), c.lat, this._heightPx(), this._fovDeg());
+  }
+
+  /** @deprecated 0.8.0: use rangeMeters(); removed in 0.9.0. */
+  rangeMetres() {
+    renamed('rangeMetres()', 'rangeMeters()');
+    return this.rangeMeters();
   }
 
   _surfaceAt(lng, lat) {
@@ -350,7 +356,7 @@ export class MapVantage extends EventTarget {
     const m = this.map;
     const c = m.getCenter();
     const b = m.getBearing() * D2R;
-    const mps = this.speed.mps ?? Math.max(this.speed.minMps, this.speed.rangeFactor * this.rangeMetres());
+    const mps = this.speed.mps ?? Math.max(this.speed.minMps, this.speed.rangeFactor * this.rangeMeters());
     const d = mps * factor * step;
     const [lng, lat] = offsetLngLat(c.lng, c.lat, (y * Math.sin(b) + x * Math.cos(b)) * d, (y * Math.cos(b) - x * Math.sin(b)) * d);
     const maxPitch = m.getMaxPitch ? m.getMaxPitch() : 60;
@@ -423,7 +429,7 @@ export class MapVantage extends EventTarget {
       const tr = m.transform;
       const eye = eyeFromView({
         lng: c.lng, lat: c.lat, elevation: tr && Number.isFinite(tr.elevation) ? tr.elevation : 0,
-        range: this.rangeMetres(), bearing: m.getBearing(), pitch: m.getPitch(),
+        range: this.rangeMeters(), bearing: m.getBearing(), pitch: m.getPitch(),
       });
       Object.assign(this._fly, eye, { vel: [0, 0, 0], dragging: false });
       this._fly.elev = this._clampElev(eye.elev);

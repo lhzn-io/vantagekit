@@ -69,7 +69,7 @@ test('link codec: geo, local, legacy, garbage', () => {
 });
 
 test('local frame round trip and DEM-viewer projection', () => {
-  const f = localFrame({ origin: { lon: -72, lat: 41 }, metresPerUnit: 100 });
+  const f = localFrame({ origin: { lon: -72, lat: 41 }, metersPerUnit: 100 });
   const [x, y, z] = f.toScene(-71.99, 41.01, -20, 5);
   close(x, (0.01 * Math.cos(41 * Math.PI / 180) * 111320) / 100);
   close(y, -1);
@@ -82,7 +82,7 @@ test('local frame round trip and DEM-viewer projection', () => {
 
 test('keyboard speed is in m/s and independent of frame rate', () => {
   for (const [mpu, frames, dt] of [[100, 10, 0.1], [100, 100, 0.01], [1, 10, 0.1]]) {
-    const v = make({ metresPerUnit: mpu, speed: { mps: 10 } });
+    const v = make({ metersPerUnit: mpu, speed: { mps: 10 } });
     const before = v.getTarget();
     v.press('forward');
     for (let i = 0; i < frames; i++) v.update(dt);
@@ -96,7 +96,7 @@ test('keyboard speed is in m/s and independent of frame rate', () => {
 });
 
 test('shift is x4 and up moves vertically', () => {
-  const v = make({ metresPerUnit: 1, speed: { mps: 10 } });
+  const v = make({ metersPerUnit: 1, speed: { mps: 10 } });
   const y0 = v.getTarget().y;
   v.press('up'); v.press('fast');
   for (let i = 0; i < 10; i++) v.update(0.1);
@@ -105,7 +105,7 @@ test('shift is x4 and up moves vertically', () => {
 });
 
 test('held keys are dropped when the page loses focus without a keyup', () => {
-  const v = make({ metresPerUnit: 1, speed: { mps: 10 } });
+  const v = make({ metersPerUnit: 1, speed: { mps: 10 } });
   const before = v.getTarget();
   globalThis.document = { hasFocus: () => false };
   try {
@@ -161,12 +161,12 @@ test('rescaleVertical shifts eye and target together', () => {
 });
 
 test('view and setView round trip through a geographic link', () => {
-  const v = make({ origin: { lon: -72, lat: 41 }, metresPerUnit: 100, exaggeration: 5 });
+  const v = make({ origin: { lon: -72, lat: 41 }, metersPerUnit: 100, exaggeration: 5 });
   v.setLookAt([12, 40, 33], [3, -1, -4]);
   v.update(0);
   const view = v.view();
   const decoded = decodeCam(new URLSearchParams(encodeCam(view)));
-  const w = make({ origin: { lon: -72, lat: 41 }, metresPerUnit: 100, exaggeration: 5 });
+  const w = make({ origin: { lon: -72, lat: 41 }, metersPerUnit: 100, exaggeration: 5 });
   w.setView(decoded.view);
   w.update(0);
   const a = w.getPosition(); const t = w.getTarget();
@@ -176,7 +176,7 @@ test('view and setView round trip through a geographic link', () => {
 });
 
 test('applyLink handles legacy links and stays pending without an origin', () => {
-  const v = make({ metresPerUnit: 100 });
+  const v = make({ metersPerUnit: 100 });
   v.readLink('?cam=1,2,3,4,5,6');
   assert.equal(v.applyLink(), true);
   v.update(0);
@@ -197,13 +197,13 @@ test('gamepad intents: dead zone, triggers and buttons', () => {
   close(p.y, 1); close(p.z, 0.5); assert.equal(p.yaw, 0); assert.equal(p.home, true); assert.equal(p.active, true);
 });
 
-test('viewInfo reports metres per pixel at the target', () => {
-  const v = make({ metresPerUnit: 100 });
+test('viewInfo reports meters per pixel at the target', () => {
+  const v = make({ metersPerUnit: 100 });
   v.setLookAt([0, 0, 10], [0, 0, 0]);
   v.update(0);
   const info = v.viewInfo();
-  close(info.rangeMetres, 1000, 1e-6);
-  close(info.metresPerPixelAtTarget, 2 * 1000 * Math.tan((55 * Math.PI / 180) / 2), 1e-6);
+  close(info.rangeMeters, 1000, 1e-6);
+  close(info.metersPerPixelAtTarget, 2 * 1000 * Math.tan((55 * Math.PI / 180) / 2), 1e-6);
   v.dispose();
 });
 
@@ -212,7 +212,7 @@ test('viewInfo reports metres per pixel at the target', () => {
 const run = (v, seconds, dt = 0.02) => { for (let t = 0; t < seconds - 1e-9; t += dt) v.update(dt); };
 
 test('fly mode moves where you look, in m/s, with a short ease in', () => {
-  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 } });
+  const v = make({ mode: 'fly', metersPerUnit: 1, speed: { mps: 10 } });
   assert.equal(v.mode, 'fly');
   v.setLookAt([0, 50, 0], [0, 50, -100]);   // level, looking north
   v.press('forward');
@@ -230,7 +230,7 @@ test('fly mode moves where you look, in m/s, with a short ease in', () => {
 });
 
 test('fly forward follows the pitch of the view', () => {
-  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 } });
+  const v = make({ mode: 'fly', metersPerUnit: 1, speed: { mps: 10 } });
   v.setLookAt([0, 100, 0], [0, 100 - Math.tan(30 * Math.PI / 180) * 100, -100]);   // 30 degrees down
   v.press('forward');
   run(v, 3);
@@ -240,7 +240,7 @@ test('fly forward follows the pitch of the view', () => {
 });
 
 test('orbit to fly and back keeps the eye and the orbit point', () => {
-  const v = make({ metresPerUnit: 100 });
+  const v = make({ metersPerUnit: 100 });
   v.setLookAt([3, 40, 25], [1, -2, -6]);
   v.update(0);
   v.setMode('fly');
@@ -272,7 +272,7 @@ test('the page chooses the modes: fly only, orbit only, validation', () => {
 });
 
 test('fly speed follows height above the surface, and the wheel steps it', () => {
-  const v = make({ mode: 'fly', metresPerUnit: 1, surfaceAt: () => 0 });
+  const v = make({ mode: 'fly', metersPerUnit: 1, surfaceAt: () => 0 });
   v.setLookAt([0, 100, 0], [0, 100, -10]);   // 100 m up, level
   v.press('forward');
   run(v, 1);
@@ -282,11 +282,11 @@ test('fly speed follows height above the surface, and the wheel steps it', () =>
 });
 
 test('fly views round trip through a geographic link', () => {
-  const a = make({ mode: 'fly', origin: { lon: -70.5, lat: 42.5 }, metresPerUnit: 100, exaggeration: 5 });
+  const a = make({ mode: 'fly', origin: { lon: -70.5, lat: 42.5 }, metersPerUnit: 100, exaggeration: 5 });
   a.setLookAt([12, 4, 33], [3, -1, -4]);
   a.update(0.016);
   const decoded = decodeCam(new URLSearchParams(encodeCam(a.view())));
-  const b = make({ origin: { lon: -70.5, lat: 42.5 }, metresPerUnit: 100, exaggeration: 5 });
+  const b = make({ origin: { lon: -70.5, lat: 42.5 }, metersPerUnit: 100, exaggeration: 5 });
   b.setView(decoded.view);
   b.update(0);
   close(b.getPosition().distanceTo(new THREE.Vector3(12, 4, 33)), 0, 1e-2);
@@ -295,7 +295,7 @@ test('fly views round trip through a geographic link', () => {
 });
 
 test('home works in both modes', () => {
-  const v = make({ metresPerUnit: 1 });
+  const v = make({ metersPerUnit: 1 });
   v.setLookAt([0, 50, 50], [0, 0, 0]);
   v.update(0);
   v.saveHome();
@@ -331,7 +331,7 @@ test("keys: 'focus' listens on the viewer element, not the page", () => {
   const key = (type, code) => Object.assign(new Event(type), { code, key: code, repeat: false, metaKey: false, altKey: false, preventDefault() { this.prevented = true; } });
   try {
     const dom = new El();
-    const v = make({ dom, keys: 'focus', metresPerUnit: 1, speed: { mps: 10 } });
+    const v = make({ dom, keys: 'focus', metersPerUnit: 1, speed: { mps: 10 } });
     assert.equal(dom.tabIndex, 0);
     dom.dispatchEvent(new Event('pointerdown'));     // a click focuses without a focus ring or scroll
     assert.equal(doc.activeElement, dom);
@@ -400,7 +400,7 @@ test('touch help rows follow the modes and preset', () => {
 });
 
 test('fly touch: one finger looks, two fingers move, pinch steps speed', () => {
-  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 }, fly: { accelTime: 0.001, curve: 1 } });
+  const v = make({ mode: 'fly', metersPerUnit: 1, speed: { mps: 10 }, fly: { accelTime: 0.001, curve: 1 } });
   v.setLookAt([0, 10, 0], [0, 10, -10]);
   const b0 = v._fly.bearing;
   v._touchDown(touchEv(1, 100, 100));
@@ -446,7 +446,7 @@ test('orbit pinch zooms by the finger ratio', () => {
 });
 
 test('fly joystick: side setting, help rows, and the stick moves like WASD', () => {
-  const v = make({ mode: 'fly', metresPerUnit: 1, speed: { mps: 10 }, fly: { accelTime: 0.001, curve: 1 } });
+  const v = make({ mode: 'fly', metersPerUnit: 1, speed: { mps: 10 }, fly: { accelTime: 0.001, curve: 1 } });
   assert.equal(v.joystick, null);
   assert.throws(() => v.setJoystick('top'), /joystick/);
   v.setJoystick('right');
@@ -482,7 +482,7 @@ test("pad: 'object' turns with both sticks and zooms with the triggers; 'map' mo
   try {
     assert.throws(() => make({ pad: 'hull' }), /pad must be/);
     // object-scale settings, as a page showing a 7 m hull would pass them
-    const obj = make({ gamepad: true, pad: 'object', metresPerUnit: 1, dollyToCursor: false, infinityDolly: false, minDistance: 2, maxDistance: 80 });
+    const obj = make({ gamepad: true, pad: 'object', metersPerUnit: 1, dollyToCursor: false, infinityDolly: false, minDistance: 2, maxDistance: 80 });
     obj.setLookAt([0, 0, 20], [0, 0, 0]);
     obj.update(0);
     const az0 = obj.controls.azimuthAngle, t0 = obj.getTarget().toArray();
@@ -502,7 +502,7 @@ test("pad: 'object' turns with both sticks and zooms with the triggers; 'map' mo
     pad.buttons[6] = { value: 0, pressed: false };
     obj.dispose();
 
-    const map = make({ gamepad: true, metresPerUnit: 1 });
+    const map = make({ gamepad: true, metersPerUnit: 1 });
     map.setLookAt([0, 0, 20], [0, 0, 0]);
     map.update(0);
     const m0 = map.getTarget().x;
@@ -517,7 +517,7 @@ test("pad: 'object' turns with both sticks and zooms with the triggers; 'map' mo
 });
 
 test("pivot: 'fixed' keeps the orbit point; keys turn and zoom; 'free' restores the page's settings", () => {
-  const v = make({ metresPerUnit: 1, minDistance: 2, mouse: 'pan-left' });
+  const v = make({ metersPerUnit: 1, minDistance: 2, mouse: 'pan-left' });
   const A = CameraControls.ACTION;
   assert.equal(v.pivot, 'free');
   assert.throws(() => v.setPivot('pinned'), /pivot must be/);
@@ -553,7 +553,7 @@ test("pivot: 'fixed' keeps the orbit point; keys turn and zoom; 'free' restores 
 });
 
 test('pivot marker sits on the orbit point at a constant screen size and fades out after a turn', () => {
-  const v = make({ metresPerUnit: 1, pivotMarker: { sizePx: 40, fadeTime: 0.5 } });
+  const v = make({ metersPerUnit: 1, pivotMarker: { sizePx: 40, fadeTime: 0.5 } });
   const g = v.pivotMarker;
   assert.ok(g && g.isObject3D);
   v.setLookAt([0, 0, 20], [0, 0, 0]);
@@ -581,6 +581,35 @@ test('pivot marker sits on the orbit point at a constant screen size and fades o
   assert.equal(g.visible, false);                              // never in fly mode
   v.dispose();
   assert.equal(v.pivotMarker, null);
+});
+
+test('the 0.7 British-spelled names still work until 0.9.0, each with one warning', () => {
+  const warned = [];
+  const orig = console.warn;
+  console.warn = (m) => warned.push(String(m));
+  try {
+    const v = make({ metresPerUnit: 100 });
+    assert.equal(v.metersPerUnit, 100);
+    v.setLookAt([0, 0, 10], [0, 0, 0]);
+    v.update(0);
+    close(v.rangeMetres(), v.rangeMeters(), 1e-9);
+    close(v.rangeMeters(), 1000, 1e-6);
+    const info = v.viewInfo();
+    close(info.rangeMetres, info.rangeMeters, 1e-9);
+    close(info.metresPerPixelAtTarget, info.metersPerPixelAtTarget, 1e-9);
+    assert.ok(!Object.keys(info).includes('rangeMetres'));
+    v.metresPerUnit = 50;
+    assert.equal(v.metersPerUnit, 50);
+    assert.equal(v.metresPerUnit, 50);
+    const f = localFrame({ origin: { lon: 0, lat: 0 }, metresPerUnit: 10 });
+    assert.equal(f.metersPerUnit, 10);
+    v.rangeMetres();                                            // a second use: no second warning
+    assert.ok(warned.length >= 5 && warned.every((w) => /renamed .*0\.9\.0/.test(w)), warned.join('\n'));
+    assert.equal(warned.filter((w) => w.includes('rangeMetres()')).length, 1);
+    v.dispose();
+  } finally {
+    console.warn = orig;
+  }
 });
 
 test('stick response curve', () => {

@@ -76,7 +76,7 @@
   </select>
   <label for="stick-curve">Stick response <span id="stick-curve-val"></span></label>
   <input id="stick-curve" type="range" min="1" max="3" step="0.25">
-  <div class="hint">Left: speed follows the push evenly. Right: more room for slow, careful moves near the centre.</div>
+  <div class="hint">Left: speed follows the push evenly. Right: more room for slow, careful moves near the center.</div>
   <label for="mouse">Orbit mouse and touch</label>
   <select id="mouse">
     <option value="rotate-left">Left button or one finger rotates</option>
@@ -88,7 +88,7 @@
     <option value="fixed">Fixed (turn and zoom only)</option>
   </select>
   <label><input id="show-pivot" type="checkbox" checked> Show the pivot while turning</label>
-  <label for="scale">Metres per scene unit</label>
+  <label for="scale">Meters per scene unit</label>
   <select id="scale">
     <option value="100">100</option>
     <option value="1">1</option>
@@ -153,7 +153,7 @@ scene.add(sun);
 const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 1e6);
 
 // ---- Synthetic coastline -------------------------------------------------------------------
-// Invented terrain, 20 km square, heights in metres (x east, y north, origin at the centre):
+// Invented terrain, 20 km square, heights in meters (x east, y north, origin at the center):
 // hills and a river valley on land to the east, a beach, a shallow shelf with a nearshore bar,
 // a submarine canyon running out from the river mouth, an offshore island, and the shelf break
 // falling to about 450 m in the west.
@@ -164,14 +164,14 @@ const gauss = (d, s) => Math.exp(-(d * d) / (2 * s * s));
 const texture = (x, y) =>
   Math.sin(x / 610 + 1.3) * Math.cos(y / 470 - 0.7) + 0.6 * Math.sin((x + y) / 330) * Math.cos((x - y) / 270 + 2.1);
 
-const RIVER_Y = 1500;   // the river and canyon axis, metres north
+const RIVER_Y = 1500;   // the river and canyon axis, meters north
 
 function coastX(y) {   // the shoreline: a gentle bay and a headland
   return 2500 + 900 * Math.sin(y / 3200) - 1100 * gauss(y + 5200, 1700) + 700 * gauss(y - 6500, 1200);
 }
 
 function inventedHeight(x, y) {
-  const d = x - coastX(y);                  // metres inland (+) or offshore (-)
+  const d = x - coastX(y);                  // meters inland (+) or offshore (-)
   if (d >= 0) {
     // Land: a beach rising into rolling hills, cut by a river valley.
     const inland = smooth(0, 2500, d);
@@ -182,7 +182,7 @@ function inventedHeight(x, y) {
     const valley = 0.6 * rise * gauss(y - RIVER_Y - 0.15 * d, 260 + 0.05 * d) * smooth(300, 2500, d);
     return Math.max(0.5, rise - valley);
   }
-  const s = -d;                             // metres offshore
+  const s = -d;                             // meters offshore
   // Shelf: 0.5 % slope to the break 9 km out, then 7 % down the slope, levelling at 450 m.
   let z = -(1 + 0.005 * s) - 0.07 * Math.max(0, s - 9000);
   z = Math.max(z, -450);
@@ -197,8 +197,8 @@ function inventedHeight(x, y) {
 }
 
 // ---- Terrains ------------------------------------------------------------------------------
-// A terrain gives its origin, its extent in metres east and north, a mesh size, heightAt(east, north)
-// in metres about the origin, colour ramps by true height, a home view, and text for the panel.
+// A terrain gives its origin, its extent in meters east and north, a mesh size, heightAt(east, north)
+// in meters about the origin, color ramps by true height, a home view, and text for the panel.
 
 const INVENTED = {
   key: 'invented',
@@ -338,7 +338,7 @@ function makeNav() {
   const mode = modes.includes(startMode) ? startMode : modes[0];
   nav = createVantage({
     THREE, CameraControls, camera, dom: canvas,
-    origin: terrain.origin, metresPerUnit: mpu,
+    origin: terrain.origin, metersPerUnit: mpu,
     exaggeration: () => builtExag,
     modes, mode,
     settingsKey: 'vantagekit-demo.fly',
@@ -419,7 +419,7 @@ function showMode() {
 
 let lastInput = 'none', padName = 'none';
 // Home: each terrain's own starting view.
-// The pivot is the centre of the terrain at ground level (fitBox alone would put it at the middle of
+// The pivot is the center of the terrain at ground level (fitBox alone would put it at the middle of
 // the bounding box, between the deepest seabed and the highest hill), framed as fitBox would.
 function frameHome() {
   const box = new THREE.Box3().setFromObject(mesh);
@@ -509,7 +509,7 @@ renderer.setAnimationLoop(() => {
   if (moved || frames++ % 30 === 0) {
     const v = nav.view(), i = nav.viewInfo();
     sel('status').textContent =
-      `range ${Math.round(i.rangeMetres)} m, ${i.metresPerPixelAtTarget.toFixed(1)} m/px\n` +
+      `range ${Math.round(i.rangeMeters)} m, ${i.metersPerPixelAtTarget.toFixed(1)} m/px\n` +
       `bearing ${v.bearing.toFixed(0)}, pitch ${v.pitch.toFixed(0)}\n` +
       `${nav.mode}${nav.mode === 'fly' ? `, speed x${i.flySpeedMultiplier.toFixed(2)}` : ''}\n` +
       `input ${lastInput}, pad ${padName}`;

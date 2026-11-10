@@ -17,7 +17,7 @@ viewer built on any renderer.
 - **Stage frames** for Y-up and Z-up scenes in any unit (`UpFrame`), with headings and yaw from
   orientations.
 - **Camera math** for orbit, chase and point-of-view cameras around a moving target (`orbit_eye`,
-  `look_at_matrix`). Every distance is in metres and every time constant in seconds.
+  `look_at_matrix`). Every distance is in meters and every time constant in seconds.
 - **Smoothing** that does not depend on frame rate (`Smoothed3`, `SmoothedAngle`, `exp_alpha`):
   the filter is solved exactly for a target moving steadily between frames, so the lag behind a
   moving target is its speed times the time constant at any frame time.

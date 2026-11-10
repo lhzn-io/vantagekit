@@ -90,7 +90,7 @@ map.on('load', () => {
     const s = nav.flyState();
     sel('status').textContent = nav.mode === 'fly'
       ? `fly, ${Math.round(s.alt)} m up, heading ${Math.round(s.bearing)}, speed x${s.speedMultiplier.toFixed(2)}\ninput ${lastInput}`
-      : `orbit, range ${Math.round(nav.rangeMetres())} m, bearing ${Math.round(map.getBearing())}, pitch ${Math.round(map.getPitch())}\ninput ${lastInput}`;
+      : `orbit, range ${Math.round(nav.rangeMeters())} m, bearing ${Math.round(map.getBearing())}, pitch ${Math.round(map.getPitch())}\ninput ${lastInput}`;
   });
   window.vantage = () => nav;   // for debugging in the console
 });

@@ -43,7 +43,7 @@ function fakeMap({ center = [-70, 42], zoom = 12, bearing = 0, pitch = 45 } = {}
 
 const make = (map, opts = {}) => createMapVantage({ maplibregl, map, keys: false, gamepad: false, ...opts });
 const run = (v, seconds, dt = 0.02) => { for (let t = 0; t < seconds - 1e-9; t += dt) v.update(dt); };
-const metresBetween = (a, b) => Math.hypot((b.lng - a.lng) * DEG_TO_M * Math.cos(a.lat * Math.PI / 180), (b.lat - a.lat) * DEG_TO_M);
+const metersBetween = (a, b) => Math.hypot((b.lng - a.lng) * DEG_TO_M * Math.cos(a.lat * Math.PI / 180), (b.lat - a.lat) * DEG_TO_M);
 
 test('the MapLibre adapter loads without MapLibre, a GPU or a DOM', () => {
   assert.match(VERSION, /^\d+\.\d+\.\d+$/);
@@ -54,24 +54,24 @@ test('the MapLibre adapter loads without MapLibre, a GPU or a DOM', () => {
 
 test('geometry helpers', () => {
   const [lng, lat] = offsetLngLat(-70, 42, 1000, 2000);
-  close(metresBetween({ lng: -70, lat: 42 }, { lng, lat }), Math.hypot(1000, 2000), 1e-6);
+  close(metersBetween({ lng: -70, lat: 42 }, { lng, lat }), Math.hypot(1000, 2000), 1e-6);
   // Zoom 0 at the equator, 512 px tiles: 78271.5 m/px; one zoom step halves the range.
   close(rangeForZoom(10, 0, 800) / rangeForZoom(11, 0, 800), 2, 1e-12);
-  // Looking straight down from 1000 m: the eye is above the centre.
+  // Looking straight down from 1000 m: the eye is above the center.
   const eye = eyeFromView({ lng: -70, lat: 42, elevation: 5, range: 1000, bearing: 30, pitch: 0 });
   close(eye.alt, 1005, 1e-9);
   close(eye.elev, -90, 1e-12);
-  close(metresBetween({ lng: -70, lat: 42 }, eye), 0, 1e-6);
-  // At pitch 60 bearing 90 (looking east) the eye is west of the centre.
+  close(metersBetween({ lng: -70, lat: 42 }, eye), 0, 1e-6);
+  // At pitch 60 bearing 90 (looking east) the eye is west of the center.
   const e2 = eyeFromView({ lng: -70, lat: 42, range: 1000, bearing: 90, pitch: 60 });
   assert.ok(e2.lng < -70);
   close(e2.alt, 500, 1e-9);
 });
 
-test('orbit: forward moves the centre along the bearing at half the range per second', () => {
+test('orbit: forward moves the center along the bearing at half the range per second', () => {
   const map = fakeMap({ bearing: 0, pitch: 0 });
   const v = make(map);
-  const r = v.rangeMetres();
+  const r = v.rangeMeters();
   const c0 = map.getCenter();
   v.press('forward');
   run(v, 1);
@@ -80,7 +80,7 @@ test('orbit: forward moves the centre along the bearing at half the range per se
   close(c1.lng, c0.lng, 1e-9);
   assert.ok(c1.lat > c0.lat);
   // the range shrinks only through zoom, which forward leaves alone, so the speed is constant
-  close(metresBetween(c0, c1), 0.5 * r, 0.5 * r * 1e-3);
+  close(metersBetween(c0, c1), 0.5 * r, 0.5 * r * 1e-3);
   v.dispose();
 });
 
@@ -107,12 +107,12 @@ test('fly: takes the map handlers, moves where it looks, gives the handlers back
   run(v, 1);
   v.release('forward');
   const s1 = v.flyState();
-  close(metresBetween(s0, s1), 10, 0.1);
+  close(metersBetween(s0, s1), 10, 0.1);
   assert.ok(s1.lng > s0.lng);   // east
   close(s1.alt, s0.alt, 1e-6);
   // ... while the view handed to MapLibre stays 5.5 degrees down, inside its 85 degree pitch limit
   const f = map.lastFrom, t = map.lastTo;
-  close(Math.atan2(f.alt - t.alt, metresBetween(f, t)) * 180 / Math.PI, 5.5, 1e-3);
+  close(Math.atan2(f.alt - t.alt, metersBetween(f, t)) * 180 / Math.PI, 5.5, 1e-3);
   assert.ok(t.lng > f.lng);
   v.setMode('orbit');
   assert.equal(map.dragPan.isEnabled(), true);

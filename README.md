@@ -2,7 +2,7 @@
 
 ![The vantagekit demo: Montauk Point, Long Island, at 5x vertical exaggeration, from offshore in the south-east, with the bluffs, Oyster Pond and the shoals east of the point, and the side panel listing the data sources and bindings](docs/demo.png)
 
-*The demo page on Montauk Point, Long Island: a 9.1 by 6.0 km topobathymetric grid at 3.8 m from NOAA survey data, served for the demo by [data.lhzn.io](https://data.lhzn.io). The Scene menu also offers an invented coastline built in the page with no data service. The side panel lists the sources, the bindings, and the live range, metres per pixel, bearing and pitch.*
+*The demo page on Montauk Point, Long Island: a 9.1 by 6.0 km topobathymetric grid at 3.8 m from NOAA survey data, served for the demo by [data.lhzn.io](https://data.lhzn.io). The Scene menu also offers an invented coastline built in the page with no data service. The side panel lists the sources, the bindings, and the live range, meters per pixel, bearing and pitch.*
 
 **[Open the live demo](https://lhzn-io.github.io/vantagekit/demo/)** (mouse, keyboard, gamepad or
 touch). URL parameters: `?mode=fly` starts in fly mode, `?pivot=fixed` fixes the orbit pivot,
@@ -23,13 +23,13 @@ writes for itself:
   is a game-style camera: mouse look (pointer lock, or drag), WASD where you look, the wheel sets
   the speed. A page offers both (F switches, Esc leaves fly) or fixes one.
 - **Keyboard and gamepad input in real units.** WASD, Q/E (or Space/C) and the arrow keys move at a
-  speed in metres per second, independent of frame rate. An Xbox-style controller (standard
+  speed in meters per second, independent of frame rate. An Xbox-style controller (standard
   mapping) moves, looks around, switches mode and resets the view.
 - **Touch in both modes.** Orbit gestures follow the mouse preset (one finger does what the left
   button does; pinch zooms by the finger ratio, as on a map). In fly mode one finger looks around,
   two fingers move like a stick (or an optional on-screen joystick moves) and pinching sets the
   speed.
-- **Scale and exaggeration aware.** Speeds and links are expressed in metres, whatever the scene
+- **Scale and exaggeration aware.** Speeds and links are expressed in meters, whatever the scene
   unit and the vertical exaggeration.
 - **Framing helpers.** `fitBox`, `placeView` (bearing, elevation, distance), `saveHome` and `home`,
   and `rescaleVertical` to keep the view steady when the exaggeration changes.
@@ -61,7 +61,7 @@ import { createVantage } from 'vantagekit/three';
 const nav = createVantage({
   THREE, CameraControls, camera, dom: renderer.domElement,
   origin: { lon: -70.5, lat: 42.5 },   // scene origin, for geographic links
-  metresPerUnit: 100,                  // one scene unit is 100 m
+  metersPerUnit: 100,                  // one scene unit is 100 m
   exaggeration: () => settings.exag,   // vertical exaggeration, read when needed
   mouse: 'pan-left',                   // orbit mouse and touch: or 'rotate-left'
   modes: ['orbit', 'fly'],             // or ['orbit'] or ['fly']; default both
@@ -184,7 +184,7 @@ settings. The stick is an absolutely positioned element added to the viewer elem
 (made `position: relative` if it was static), placed clear of the screen's safe-area insets;
 `fly.joystickSize` sets its diameter (120 CSS px), and `fly.joystickCurve` its response (the
 power applied to the push: 1 is linear, 2, the default from `fly.curve`, leaves more room for slow
-moves near the centre). It shows only in fly mode while the controller is enabled. A page that offers it on touch devices only can pass
+moves near the center). It shows only in fly mode while the controller is enabled. A page that offers it on touch devices only can pass
 `joystick: matchMedia('(pointer: coarse)').matches ? 'left' : null`. The demo starts phones with
 the stick on the left; its panel moves it or turns it off.
 
@@ -219,11 +219,11 @@ map.on('load', () => {
 ```
 
 In orbit mode MapLibre's own mouse and touch handlers keep the camera; vantagekit adds WASD and
-the arrows (moving the centre at half the view distance per second), Q/E to zoom out and in, a
+the arrows (moving the center at half the view distance per second), Q/E to zoom out and in, a
 gamepad (the right stick turns and tilts), and Home. Fly mode takes over: drag to look, WASD where
 you look, Q/E or C/Space down and up, the wheel steps the speed, Esc returns to the map's handlers
 exactly as the page had set them. Fly speed is half the height above the sea surface, or above the
-terrain when the map has terrain, per second; `fly.minAltitude` (metres) keeps the eye above a
+terrain when the map has terrain, per second; `fly.minAltitude` (meters) keeps the eye above a
 floor, so it can stay above a sea surface drawn over an exaggerated seabed.
 
 MapLibre 4.x caps the pitch at 85 degrees, so the view can look no higher than about 5 degrees
@@ -235,7 +235,7 @@ usually shares the page), and the adapter runs its own frame loop only while som
 camera. A page that drives the camera itself, for example a camera that follows a moving object,
 calls `setEnabled(false)` while it does and `setEnabled(true)` to hand control back; disabling leaves
 fly mode. Other members: `setMode()`, `mode`, `modes`, `bindings`, `saveHome()`, `home()`,
-`stepFlySpeed()`, `turn()`, `flyState()`, `rangeMetres()`, `press()`, `release()`, `update(dt)`,
+`stepFlySpeed()`, `turn()`, `flyState()`, `rangeMeters()`, `press()`, `release()`, `update(dt)`,
 `dispose()`. Events: `move`, `input`, `gamepad`, `modechange`, `speed`. Touch fly gestures are not
 in the MapLibre adapter yet.
 
@@ -259,7 +259,7 @@ in the MapLibre adapter yet.
 | `rescaleVertical(prev, next, anchorY)` | Keep a point steady when the exaggeration changes |
 | `view()`, `setView(view, animate)` | Renderer-neutral view state |
 | `readLink()`, `applyLink()`, `writeLink()` | Camera links in the URL |
-| `viewInfo()` | Eye, target, range and metres per pixel, for level of detail and screen-space sizes |
+| `viewInfo()` | Eye, target, range and meters per pixel, for level of detail and screen-space sizes |
 | `press(intent)`, `release(intent)` | Drive movement from your own controls |
 | `bindings`, `touchBindings` | Key and pad bindings, and touch gestures, for a help panel |
 | `setEnabled(on)`, `setOrigin(origin)`, `dispose()` | Lifecycle |
@@ -268,16 +268,21 @@ Events: `move`, `rest`, `input` (`mouse`, `touch`, `keyboard` or `gamepad`), `ga
 disconnected), `link` (URL rewritten), `modechange`, `speed` (fly speed multiplier changed),
 `recover` (a non-finite camera was reset to the last good view), `joystick` (side changed), `pivot` (pivot mode changed).
 
+Renamed in 0.8.0, to match the Python package and USD's `metersPerUnit`: `metresPerUnit` is now
+`metersPerUnit` (option, property and `localFrame`), `rangeMetres()` is `rangeMeters()`, and
+`viewInfo()` returns `rangeMeters` and `metersPerPixelAtTarget`. The old names still work in 0.8 and
+print one console warning each; 0.9.0 removes them.
+
 ## View links
 
 ```
 ?cv=1&cam=lon,lat,h,range,bearing,pitch
 ```
 
-The orbit target (longitude and latitude to 6 decimals), its true height in metres (the scene
-height divided by the exaggeration), the eye distance in rendered metres, and the look direction:
+The orbit target (longitude and latitude to 6 decimals), its true height in meters (the scene
+height divided by the exaggeration), the eye distance in rendered meters, and the look direction:
 bearing in degrees clockwise from north, pitch in degrees from straight down. Scenes without an
-origin write `cf=local` with east and north metres in place of longitude and latitude. Links
+origin write `cf=local` with east and north meters in place of longitude and latitude. Links
 without `cv` are read as six scene-unit numbers (eye, then target) for older pages. The link is
 rewritten (with `history.replaceState`) on the first still frame after the camera moves. Other URL
 parameters and the hash are preserved; pages add their own through the `link.app` hook.
@@ -354,6 +359,6 @@ tests; the commands above run them. The modules load from a CDN with no build st
 plain ES modules with no imports beyond each other, and renderer libraries are passed in as
 arguments.
 
-## Licence
+## License
 
 MIT. Copyright (c) 2026 Long Horizon Observatory.
