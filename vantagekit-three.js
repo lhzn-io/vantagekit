@@ -151,6 +151,13 @@ export class Vantage extends EventTarget {
     if (o.touches) Object.assign(c.touches, o.touches);
     c.dollyToCursor = o.dollyToCursor ?? true;
     c.infinityDolly = o.infinityDolly ?? true;
+    // The page's own orbit settings, restored when the pivot goes back to 'free'.
+    this._freeOrbit = {
+      mouseButtons: { ...c.mouseButtons }, touches: { ...c.touches },
+      dollyToCursor: c.dollyToCursor, infinityDolly: c.infinityDolly,
+    };
+    this.pivotMode = 'free';
+    if (o.pivot != null) this.setPivot(o.pivot, { emit: false });
     c.minDistance = o.minDistance ?? 10 / this.metresPerUnit;
     c.maxDistance = o.maxDistance ?? Infinity;
     c.maxPolarAngle = o.maxPolarAngle ?? Math.PI * 0.85;
@@ -191,10 +198,22 @@ export class Vantage extends EventTarget {
     this._stickPointer = null;
     this._stick = { x: 0, y: 0 };
 
-    this._onControlStart = () => this._setInput(this._pointerType === 'touch' ? 'touch' : 'mouse');
+    this._onControlStart = () => {
+      this._setInput(this._pointerType === 'touch' ? 'touch' : 'mouse');
+      this._orbitDragging = true;
+    };
+    this._onControlEnd = () => { this._orbitDragging = false; this._pivotShow = Math.max(this._pivotShow, 1); };
     this._onRest = () => this._emit('rest');
     c.addEventListener('controlstart', this._onControlStart);
+    c.addEventListener('controlend', this._onControlEnd);
     c.addEventListener('rest', this._onRest);
+
+    // Pivot marker: a ring and dot at the orbit point, drawn while an orbit gesture or key or stick
+    // turns the view, then faded out. The page adds `pivotMarker` to its scene.
+    this._orbitDragging = false;
+    this._pivotShow = 0;        // seconds-weighted visibility, 1 = fully shown
+    this.pivotMarker = null;
+    if (o.pivotMarker) this._buildPivotMarker(o.pivotMarker === true ? {} : o.pivotMarker);
 
     this._listeners = [];
     // keys: true listens on the whole page; 'focus' only while the viewer element has focus (a
@@ -432,6 +451,86 @@ export class Vantage extends EventTarget {
     this._stickRelease();
   }
 
+  // ---- orbit pivot -------------------------------------------------------------------------
+
+  /** 'free' (the orbit point follows zoom and pan) or 'fixed' (it stays where it was placed). */
+  get pivot() {
+    return this.pivotMode;
+  }
+
+  /**
+   * 'free': the orbit point moves with the view, as on a map: zoom heads for the cursor and pushes
+   * the point ahead past the minimum distance, and panning, WASD and the left stick move it.
+   * 'fixed': the orbit point stays put for a viewer of one object: zoom runs straight in and out and
+   * stops at the minimum distance, drags rotate, pan is off, and the keys and sticks rotate and zoom.
+   * Home, setView, links and leaving fly mode still place it.
+   */
+  setPivot(mode, { emit = true } = {}) {
+    if (mode !== 'free' && mode !== 'fixed') throw new Error(`vantagekit: pivot must be 'free' or 'fixed'`);
+    const c = this.controls, A = c.constructor.ACTION, f = this._freeOrbit;
+    if (mode === 'fixed') {
+      Object.assign(c.mouseButtons, { left: A.ROTATE, middle: A.DOLLY, right: A.ROTATE, wheel: A.DOLLY });
+      Object.assign(c.touches, { one: A.TOUCH_ROTATE, two: A.TOUCH_DOLLY, three: A.NONE });
+      c.dollyToCursor = false;
+      c.infinityDolly = false;
+    } else {
+      Object.assign(c.mouseButtons, f.mouseButtons);
+      Object.assign(c.touches, f.touches);
+      c.dollyToCursor = f.dollyToCursor;
+      c.infinityDolly = f.infinityDolly;
+    }
+    this.pivotMode = mode;
+    if (emit) this._emit('pivot', { mode });
+  }
+
+  _buildPivotMarker(opts) {
+    const T = this.THREE;
+    if (!T.RingGeometry || !T.Group) return;
+    this._pivotOpts = { color: 0xdecf03, sizePx: 28, fadeTime: 0.6, ...opts };
+    const mat = new T.MeshBasicMaterial({
+      color: this._pivotOpts.color, transparent: true, opacity: 0, depthTest: false, depthWrite: false, side: T.DoubleSide,
+    });
+    const halo = new T.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0, depthTest: false, depthWrite: false, side: T.DoubleSide,
+    });
+    const g = new T.Group();
+    // unit size: the ring's outer radius is 1; update() scales it to sizePx on screen
+    const parts = [
+      new T.Mesh(new T.RingGeometry(0.72, 1.12, 48), halo),
+      new T.Mesh(new T.RingGeometry(0.8, 1, 48), mat),
+      new T.Mesh(new T.CircleGeometry(0.2, 24), mat),
+    ];
+    parts.forEach((m, i) => { m.renderOrder = 1000 + i; m.frustumCulled = false; g.add(m); });
+    g.visible = false;
+    g.frustumCulled = false;
+    g.name = 'vantagekit-pivot';
+    this.pivotMarker = g;
+    this._pivotMats = [mat, halo];
+  }
+
+  _updatePivotMarker(step) {
+    const g = this.pivotMarker;
+    if (!g) return false;
+    if (this.mode !== 'orbit' || !this._enabled) { g.visible = false; this._pivotShow = 0; return false; }
+    const was = g.visible;
+    if (this._orbitDragging) this._pivotShow = 1 + this._pivotOpts.fadeTime;   // hold, then fade after release
+    else this._pivotShow = Math.max(0, this._pivotShow - step);
+    const a = Math.min(1, this._pivotShow / this._pivotOpts.fadeTime);
+    g.visible = a > 0;
+    if (!g.visible) return was;
+    const t = this.controls.getTarget(new this.THREE.Vector3());
+    g.position.copy(t);
+    g.quaternion.copy(this.camera.quaternion);
+    const dist = this.camera.position.distanceTo(t);
+    const hPx = (this.dom && this.dom.clientHeight) || 800;
+    const fov = (this.camera.getEffectiveFOV ? this.camera.getEffectiveFOV() : this.camera.fov) * D2R;
+    const s = ((this._pivotOpts.sizePx / 2) * 2 * dist * Math.tan(fov / 2)) / hPx;
+    g.scale.setScalar(Math.max(s, 1e-9));
+    this._pivotMats[0].opacity = 0.95 * a;
+    this._pivotMats[1].opacity = 0.45 * a;
+    return true;
+  }
+
   // ---- on-screen joystick ------------------------------------------------------------------
 
   /** The joystick side ('left' or 'right'), or null when there is none. */
@@ -562,13 +661,14 @@ export class Vantage extends EventTarget {
   get touchBindings() {
     const orbit = this.modes.includes('orbit') && !this._customTouches;
     const fly = this.modes.includes('fly');
-    const rot = this.mousePreset === 'rotate-left';
+    const fixed = this.pivotMode === 'fixed';
+    const rot = this.mousePreset === 'rotate-left' || fixed;
     const stick = !!this.joystick;
     const rows = [
       ...(stick ? [{ gesture: 'Joystick', fly: 'move' }] : []),
       { gesture: 'One-finger drag', orbit: rot ? 'rotate' : 'pan', fly: 'look around' },
-      { gesture: 'Pinch', orbit: 'zoom toward the fingers', fly: 'speed (spread is faster)' },
-      { gesture: 'Two-finger drag', orbit: rot ? 'pan' : 'rotate and tilt', fly: stick ? undefined : 'move, like a stick held away from where it began' },
+      { gesture: 'Pinch', orbit: fixed ? 'zoom' : 'zoom toward the fingers', fly: 'speed (spread is faster)' },
+      { gesture: 'Two-finger drag', orbit: fixed ? undefined : rot ? 'pan' : 'rotate and tilt', fly: stick ? undefined : 'move, like a stick held away from where it began' },
     ];
     return rows.map((r) => ({
       gesture: r.gesture,
@@ -722,9 +822,10 @@ export class Vantage extends EventTarget {
     if (this._enabled) {
       ({ x, y, z, factor } = keyIntents(this._held));
       const p = this._pollPad();
-      if (p && this.padMapping === 'object' && this.mode === 'orbit') {
-        // Object viewer: both sticks turn around the orbit point (the left stick with the right
-        // stick's signs) and the triggers zoom (right in, left out). The keys still move.
+      const fixed = this.mode === 'orbit' && this.pivotMode === 'fixed';
+      if (p && (this.padMapping === 'object' || fixed) && this.mode === 'orbit') {
+        // Object viewer (or a fixed pivot): both sticks turn around the orbit point (the left stick
+        // with the right stick's signs) and the triggers zoom (right in, left out).
         yaw = clamp1(p.yaw + p.x);
         pitch = clamp1(p.pitch - p.y);
         padDolly = p.z;
@@ -742,6 +843,16 @@ export class Vantage extends EventTarget {
         y += applyCurve(this._touchMove.y, this.fly.curve) + applyCurve(this._stick.y, sc);
       }
       x = clamp1(x); y = clamp1(y); z = clamp1(z);
+      if (fixed) {
+        // A fixed pivot never moves: the move keys turn around it (A/D turn, W/S tilt, as the left
+        // stick does) and down/up (Q/E) zoom in and out.
+        yaw = clamp1(yaw + x);
+        pitch = clamp1(pitch - y);
+        padDolly = clamp1(padDolly - z);
+        x = y = z = 0;
+      }
+      // keys and sticks turning or zooming the orbit view show the pivot as a drag does
+      if (this.mode === 'orbit' && (yaw || pitch || padDolly)) this._pivotShow = 1 + (this._pivotOpts?.fadeTime ?? 0);
     }
     if (this.mode === 'fly') {
       moved = this._updateFly(step, x, y, z, factor, yaw, pitch, sprint);
@@ -769,6 +880,8 @@ export class Vantage extends EventTarget {
       }
       moved = c.update(step) || moved;
     }
+    // While the pivot marker shows or fades, an on-demand renderer must keep drawing.
+    if (this._updatePivotMarker(step)) moved = true;
     // A zero-size element (hidden or collapsed) makes camera-controls divide by zero, and one
     // NaN poisons the camera for good. Return to the last finite view instead.
     const cp = this.camera.position;
@@ -1034,7 +1147,14 @@ export class Vantage extends EventTarget {
     this._listeners = [];
     this.controls.removeEventListener('controlstart', this._onControlStart);
     this.controls.removeEventListener('rest', this._onRest);
+    this.controls.removeEventListener('controlend', this._onControlEnd);
     this.controls.dispose();
+    if (this.pivotMarker) {
+      this.pivotMarker.removeFromParent?.();
+      this.pivotMarker.traverse((m) => m.geometry && m.geometry.dispose());
+      this._pivotMats.forEach((m) => m.dispose());
+      this.pivotMarker = null;
+    }
     if (this._stickEl) { this._stickEl.remove(); this._stickEl = null; }
   }
 }

@@ -516,6 +516,73 @@ test("pad: 'object' turns with both sticks and zooms with the triggers; 'map' mo
   }
 });
 
+test("pivot: 'fixed' keeps the orbit point; keys turn and zoom; 'free' restores the page's settings", () => {
+  const v = make({ metresPerUnit: 1, minDistance: 2, mouse: 'pan-left' });
+  const A = CameraControls.ACTION;
+  assert.equal(v.pivot, 'free');
+  assert.throws(() => v.setPivot('pinned'), /pivot must be/);
+  v.setLookAt([0, 0, 20], [0, 0, 0]);
+  v.update(0);
+  v.setPivot('fixed');
+  assert.equal(v.controls.dollyToCursor, false);
+  assert.equal(v.controls.infinityDolly, false);
+  assert.equal(v.controls.mouseButtons.left, A.ROTATE);        // pan-left's left-button pan is off
+  assert.equal(v.controls.touches.two, A.TOUCH_DOLLY);         // pinch zooms, two-finger drag does not pan
+  const t0 = v.getTarget().toArray(), az0 = v.controls.azimuthAngle, d0 = v.controls.distance;
+  v.press('right');                                            // D turns instead of moving
+  run(v, 1);
+  v.release('right');
+  close(Math.abs(v.controls.azimuthAngle - az0), Math.PI / 2, 0.05);
+  v.press('down');                                             // Q zooms in
+  run(v, 1);
+  v.release('down');
+  assert.ok(v.controls.distance < d0 * 0.5);
+  assert.deepEqual(v.getTarget().toArray().map((x) => +x.toFixed(6)), t0.map((x) => +x.toFixed(6)));
+  assert.equal(v.touchBindings.find((r) => r.gesture === 'Two-finger drag').orbit, undefined);
+  v.setPivot('free');
+  assert.equal(v.controls.dollyToCursor, true);
+  assert.equal(v.controls.mouseButtons.left, A.TRUCK);
+  const m0 = v.getTarget();
+  v.press('right');                                            // free again: D moves the orbit point
+  run(v, 0.5);
+  v.release('right');
+  assert.ok(v.getTarget().distanceTo(m0) > 0.1);
+  const p = make({ pivot: 'fixed' });
+  assert.equal(p.pivot, 'fixed');
+  v.dispose(); p.dispose();
+});
+
+test('pivot marker sits on the orbit point at a constant screen size and fades out after a turn', () => {
+  const v = make({ metresPerUnit: 1, pivotMarker: { sizePx: 40, fadeTime: 0.5 } });
+  const g = v.pivotMarker;
+  assert.ok(g && g.isObject3D);
+  v.setLookAt([0, 0, 20], [0, 0, 0]);
+  v.update(0.02);
+  assert.equal(g.visible, false);                              // nothing turning: hidden
+  v.press('up');                                               // in free mode E elevates: not a turn
+  v.update(0.02);
+  v.release('up');
+  v.update(0.02);
+  assert.equal(g.visible, false);
+  v._onControlStart();                                         // an orbit drag begins
+  assert.equal(v.update(0.02), true);                          // the marker keeps an on-demand page drawing
+  assert.equal(g.visible, true);
+  close(g.position.distanceTo(v.getTarget()), 0, 1e-9);
+  const s1 = g.scale.x;
+  v.controls.dollyTo(v.controls.distance * 2, false);
+  v.update(0.02);
+  close(g.scale.x / s1, 2, 0.05);                              // twice as far, twice as large: same pixels
+  v._onControlEnd();
+  run(v, 2);
+  assert.equal(g.visible, false);                              // faded after release
+  v.setMode('fly');
+  v._onControlStart();
+  v.update(0.02);
+  assert.equal(g.visible, false);                              // never in fly mode
+  v.dispose();
+  assert.equal(v.pivotMarker, null);
+});
+
 test('stick response curve', () => {
   assert.equal(applyCurve(0.5, 2), 0.25);
   assert.equal(applyCurve(-0.5, 2), -0.25);

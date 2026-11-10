@@ -5,8 +5,11 @@
 *The demo page on Montauk Point, Long Island: a 9.1 by 6.0 km topobathymetric grid at 3.8 m from NOAA survey data, served for the demo by [data.lhzn.io](https://data.lhzn.io). The Scene menu also offers an invented coastline built in the page with no data service. The side panel lists the sources, the bindings, and the live range, metres per pixel, bearing and pitch.*
 
 **[Open the live demo](https://lhzn-io.github.io/vantagekit/demo/)** (mouse, keyboard, gamepad or
-touch). `?mode=fly` starts in fly mode. A [MapLibre demo](https://lhzn-io.github.io/vantagekit/demo/maplibre.html)
-shows the same keys and fly mode on a MapLibre GL JS map.
+touch). URL parameters: `?mode=fly` starts in fly mode, `?pivot=fixed` fixes the orbit pivot,
+`?scene=invented` opens the invented coastline, and `?dem=<url>` loads another grid in the format
+data.lhzn.io documents (for example a local copy). A
+[MapLibre demo](https://lhzn-io.github.io/vantagekit/demo/maplibre.html) shows the same keys and fly
+mode on a MapLibre GL JS map.
 
 Shared navigation for viewers of Earth-system model domains: terrain, seabed, ocean and atmosphere
 scenes in the browser. It sits on top of
@@ -109,6 +112,24 @@ ones fast; without it, of the distance to the orbit point when fly mode began. M
 and out over about 0.15 s. The fly settings `sensitivity` (degrees per pixel), `invertY` and
 `curve` can be changed with `setFlySettings()` and remembered per browser with `settingsKey`.
 Flying through terrain is allowed.
+
+## Orbit pivot
+
+The orbit point (the pivot) is what a drag turns the camera around. By default, `pivot: 'free'`, it
+moves with the view, as on a map: zoom heads for the cursor and pushes the pivot ahead past the
+minimum distance, and panning, WASD and the left stick move it. That suits terrain, where you zoom
+toward something and keep exploring from there; Home puts the pivot back.
+
+`pivot: 'fixed'` keeps the pivot where the page or the user placed it, for a viewer of one object:
+zoom runs straight in and out and stops at the minimum distance, a drag with either mouse button or one
+finger rotates, panning is off, WASD and the left stick turn around the pivot, Q/E zoom, and the gamepad
+uses the object mapping below. Home, `setView`, links and leaving fly mode still place it.
+`setPivot('free' | 'fixed')` switches at run time and restores the page's own orbit settings.
+
+`pivotMarker: true` (or `{ color, sizePx, fadeTime }`; brand yellow, 28 CSS px and 0.6 s by default)
+draws a ring at the pivot while an orbit drag, a key or a stick turns or zooms the view, at a constant
+size on screen, and fades it after release. The page adds `nav.pivotMarker` to its scene; `dispose()`
+removes it. While it shows or fades, `update()` returns `true`, so on-demand renderers keep drawing.
 
 ## Object viewers
 
@@ -232,6 +253,7 @@ in the MapLibre adapter yet.
 | `saveHome()`, `home(animate)` | Remember and return to a view (Home key, pad A), in either mode |
 | `setMode(mode)`, `mode`, `modes` | Switch between the page's modes; the current and offered modes |
 | `stepFlySpeed(steps)`, `setFlySpeed(multiplier)`, `flySpeed`, `turn(rightDeg, upDeg)`, `setFlySettings(partial)` | Fly speed, look and settings from your own controls |
+| `setPivot(mode)`, `pivot`, `pivotMarker` | Fixed or free orbit pivot, and the marker object to add to the scene |
 | `setJoystick(side)`, `joystick` | Show the fly mode on-screen stick bottom `left` or `right`, or remove it (`null`) |
 | `setSurface(fn)` | Set the surface height lookup used for fly speed |
 | `rescaleVertical(prev, next, anchorY)` | Keep a point steady when the exaggeration changes |
@@ -244,7 +266,7 @@ in the MapLibre adapter yet.
 
 Events: `move`, `rest`, `input` (`mouse`, `touch`, `keyboard` or `gamepad`), `gamepad` (connected or
 disconnected), `link` (URL rewritten), `modechange`, `speed` (fly speed multiplier changed),
-`recover` (a non-finite camera was reset to the last good view), `joystick` (side changed).
+`recover` (a non-finite camera was reset to the last good view), `joystick` (side changed), `pivot` (pivot mode changed).
 
 ## View links
 

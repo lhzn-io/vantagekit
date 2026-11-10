@@ -82,6 +82,12 @@
     <option value="rotate-left">Left button or one finger rotates</option>
     <option value="pan-left">Left button or one finger pans</option>
   </select>
+  <label for="pivot">Orbit pivot</label>
+  <select id="pivot">
+    <option value="free">Follows zoom and pan</option>
+    <option value="fixed">Fixed (turn and zoom only)</option>
+  </select>
+  <label><input id="show-pivot" type="checkbox" checked> Show the pivot while turning</label>
   <label for="scale">Metres per scene unit</label>
   <select id="scale">
     <option value="100">100</option>
@@ -114,6 +120,7 @@ const params = new URLSearchParams(location.search);
 const DEM_URL = params.get('dem') || 'https://data.lhzn.io/vantagekit/montauk-5m';
 const sel = (id) => document.getElementById(id);
 sel('mouse').value = params.get('mouse') || 'rotate-left';
+sel('pivot').value = params.get('pivot') === 'fixed' ? 'fixed' : 'free';
 sel('scale').value = params.get('mpu') || '100';
 sel('exag').value = params.get('ex') || '5';
 sel('modes').value = params.get('modes') || 'orbit,fly';
@@ -340,6 +347,8 @@ function makeNav() {
     // Fly speed scales with height above the land, the seabed or, over water, the sea surface.
     surfaceAt: (x, z) => (Math.max(0, heightAt(x * mpu, -z * mpu)) * builtExag) / mpu,
     mouse: sel('mouse').value,
+    pivot: sel('pivot').value,
+    pivotMarker: true,
     link: sel('link').checked && {
       app: {
         write(p) {
@@ -347,6 +356,7 @@ function makeNav() {
           p.set('modes', sel('modes').value);
           p.set('mode', nav.mode);
           p.set('mouse', sel('mouse').value);
+          p.set('pivot', nav.pivot);
           p.set('mpu', sel('scale').value);
           p.set('ex', sel('exag').value);
         },
@@ -357,6 +367,8 @@ function makeNav() {
   nav.addEventListener('gamepad', (e) => { padName = e.detail.connected ? e.detail.id : 'none'; });
   nav.addEventListener('modechange', (e) => { startMode = e.detail.mode; showMode(); });
   nav.addEventListener('speed', () => showMode());
+  nav.addEventListener('pivot', () => { showHelp(); showMode(); });
+  if (sel('show-pivot').checked) scene.add(nav.pivotMarker);   // dispose() takes it out again
   if (flySpeed !== 1) nav.setFlySpeed(flySpeed);   // keep the speed across a rebuilt controller
   showHelp();
   sel('sens').value = nav.fly[lookKey];
@@ -389,8 +401,11 @@ function showMode() {
   flySpeed = nav.flySpeed;
   const speed = `speed x${flySpeed.toFixed(flySpeed < 1 ? 2 : 1)}`;
   sel('mode-hint').textContent = !fly
-    ? (touchFirst ? 'Orbit: drag to turn the scene, pinch to zoom, two fingers to pan.'
-      : 'Orbit: drag to turn the scene, the wheel zooms, WASD moves.')
+    ? (nav.pivot === 'fixed'
+      ? (touchFirst ? 'Orbit, fixed pivot: drag to turn about it, pinch to zoom.'
+        : 'Orbit, fixed pivot: drag or WASD to turn about it, the wheel or Q/E zoom.')
+      : touchFirst ? 'Orbit: drag to turn the scene, pinch to zoom, two fingers to pan.'
+        : 'Orbit: drag to turn the scene, the wheel zooms, WASD moves.')
     : touchFirst && nav.joystick
       ? `Fly: the stick moves you, drag anywhere else to look, pinch for speed (${speed}).`
     : touchFirst
@@ -404,8 +419,16 @@ function showMode() {
 
 let lastInput = 'none', padName = 'none';
 // Home: each terrain's own starting view.
+// The pivot is the centre of the terrain at ground level (fitBox alone would put it at the middle of
+// the bounding box, between the deepest seabed and the highest hill), framed as fitBox would.
 function frameHome() {
-  nav.fitBox(new THREE.Box3().setFromObject(mesh), terrain.home);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+  const mpu = builtMpu;
+  const ground = (heightAt(c.x * mpu, -c.z * mpu) * builtExag) / mpu;
+  const { bearingDeg, elevationDeg, factor } = terrain.home;
+  const distance = (Math.max(size.x, size.z) * factor) / Math.min(1, camera.aspect > 0 ? camera.aspect : 1);
+  nav.placeView({ target: [c.x, ground, c.z], bearingDeg, elevationDeg, distance });
   nav.saveHome();
 }
 function frame() {
@@ -442,6 +465,10 @@ sel('invert').addEventListener('change', () => nav.setFlySettings({ invertY: sel
 sel('stick').addEventListener('change', () => { nav.setJoystick(sel('stick').value || null); showHelp(); showMode(); });
 sel('modes').addEventListener('change', () => remake());
 sel('mouse').addEventListener('change', () => remake());
+sel('pivot').addEventListener('change', () => { nav.setPivot(sel('pivot').value); nav.writeLink(); });
+sel('show-pivot').addEventListener('change', () => {
+  if (sel('show-pivot').checked) scene.add(nav.pivotMarker); else nav.pivotMarker.removeFromParent();
+});
 sel('scale').addEventListener('change', () => remake({ rebuild: true }));
 sel('exag').addEventListener('input', () => {
   const prev = builtExag;
