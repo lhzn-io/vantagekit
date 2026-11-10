@@ -51,7 +51,12 @@
 </div>
 <details id="panel" open>
   <summary>vantagekit demo</summary>
-  <div>An invented coastline, 20 km across: hills, a river valley, a shelf with a canyon, and an island.</div>
+  <label for="scene">Scene</label>
+  <select id="scene">
+    <option value="montauk">Montauk Point (survey data)</option>
+    <option value="invented">Invented coastline</option>
+  </select>
+  <div id="scene-about" class="hint"></div>
   <label for="modes">Modes offered (a page setting)</label>
   <select id="modes">
     <option value="orbit,fly">Orbit and fly</option>
@@ -102,10 +107,11 @@ import * as THREE from 'three';
 import CameraControls from 'camera-controls';
 import { createVantage } from '../vantagekit-three.js';
 
-const ORIGIN = { lon: -70.5, lat: 42.5 };   // an arbitrary open-ocean point
-const SPAN_M = 20000;
-const N = 256;
 const params = new URLSearchParams(location.search);
+// The Montauk Point elevation grid, served for this demo by data.lhzn.io: <DEM_URL>.json (geometry,
+// datum, sources, encoding) names the data file beside it. ?dem= points the demo at another grid in
+// that format, for example a local copy.
+const DEM_URL = params.get('dem') || 'https://data.lhzn.io/vantagekit/montauk-5m';
 const sel = (id) => document.getElementById(id);
 sel('mouse').value = params.get('mouse') || 'rotate-left';
 sel('scale').value = params.get('mpu') || '100';
@@ -157,7 +163,7 @@ function coastX(y) {   // the shoreline: a gentle bay and a headland
   return 2500 + 900 * Math.sin(y / 3200) - 1100 * gauss(y + 5200, 1700) + 700 * gauss(y - 6500, 1200);
 }
 
-function heightAt(x, y) {
+function inventedHeight(x, y) {
   const d = x - coastX(y);                  // metres inland (+) or offshore (-)
   if (d >= 0) {
     // Land: a beach rising into rolling hills, cut by a river valley.
@@ -183,9 +189,96 @@ function heightAt(x, y) {
   return z + 1.5 * texture(x, y);
 }
 
-// Colours: greens to tans on land, light to dark blue with depth (both by true height).
-const LAND = [[0, [0.80, 0.76, 0.58]], [6, [0.42, 0.58, 0.32]], [120, [0.33, 0.48, 0.26]], [260, [0.55, 0.47, 0.34]]];
-const SEA = [[0, [0.62, 0.80, 0.82]], [-25, [0.33, 0.62, 0.74]], [-120, [0.16, 0.38, 0.62]], [-450, [0.06, 0.13, 0.32]]];
+// ---- Terrains ------------------------------------------------------------------------------
+// A terrain gives its origin, its extent in metres east and north, a mesh size, heightAt(east, north)
+// in metres about the origin, colour ramps by true height, a home view, and text for the panel.
+
+const INVENTED = {
+  key: 'invented',
+  origin: { lon: -70.5, lat: 42.5 },   // an arbitrary open-ocean point
+  spanE: 20000, spanN: 20000, nE: 256, nN: 256,
+  heightAt: inventedHeight,
+  land: [[0, [0.80, 0.76, 0.58]], [6, [0.42, 0.58, 0.32]], [120, [0.33, 0.48, 0.26]], [260, [0.55, 0.47, 0.34]]],
+  sea: [[0, [0.62, 0.80, 0.82]], [-25, [0.33, 0.62, 0.74]], [-120, [0.16, 0.38, 0.62]], [-450, [0.06, 0.13, 0.32]]],
+  // from offshore in the south-west, looking north-east toward the coast
+  home: { bearingDeg: 60, elevationDeg: 35, factor: 0.8 },
+  about: 'An invented coastline, 20 km across: hills, a river valley, a shelf with a canyon, and an island.',
+};
+
+const SOURCE_NAMES = {
+  noaa_bluetopo: 'NOAA BlueTopo', noaa_topobathy: 'NOAA topobathy lidar', ncei_bag: 'NOAA BAG surveys',
+  ncei_cudem: 'NOAA NCEI CUDEM', usgs_lidar: 'USGS lidar', usgs_3dep: 'USGS 3DEP', gebco_2025: 'GEBCO 2025',
+};
+
+// Fetch a gridded DEM and wrap it as a terrain. The mesh is a decimated copy (at most about 800
+// vertices a side, 400 on phones); heightAt samples the full grid, bilinearly.
+async function loadDem(url) {
+  const jsonUrl = new URL(url + '.json', location.href);
+  const meta = await fetch(jsonUrl).then((r) => { if (!r.ok) throw new Error(`${jsonUrl}: ${r.status}`); return r.json(); });
+  const e = meta.encoding;
+  const dataUrl = new URL(meta.files?.data ?? (url.split('/').pop() + '.bin'), jsonUrl);
+  const res = await fetch(dataUrl);
+  if (!res.ok) throw new Error(`${dataUrl}: ${res.status}`);
+  // gzip is undone here, not by the server's Content-Encoding, so any static host can serve it
+  const body = e.compression === 'gzip' ? res.body.pipeThrough(new DecompressionStream('gzip')) : res.body;
+  const buf = await new Response(body).arrayBuffer();
+  const W = meta.width, H = meta.height;
+  const q = new Int16Array(buf);
+  if (q.length !== W * H) throw new Error(`${dataUrl}: expected ${W * H} cells, got ${q.length}`);
+  // Rows stored as differences from the row above: add them back (Int16Array wraps, as the packer did).
+  if (e.row_delta) for (let i = W; i < q.length; i++) q[i] += q[i - W];
+  const z = new Float32Array(W * H);
+  for (let i = 0; i < z.length; i++) z[i] = q[i] === e.nodata ? 0 : q[i] * e.scale_m;
+  const dx = meta.cell_m.x, dy = meta.cell_m.y;
+  const spanE = (W - 1) * dx, spanN = (H - 1) * dy;
+  const heightAt = (east, north) => {
+    const c = Math.min(W - 1.001, Math.max(0, (east + spanE / 2) / dx));
+    const r = Math.min(H - 1.001, Math.max(0, (spanN / 2 - north) / dy));
+    const c0 = Math.floor(c), r0 = Math.floor(r), fc = c - c0, fr = r - r0;
+    const i = r0 * W + c0;
+    return (z[i] * (1 - fc) + z[i + 1] * fc) * (1 - fr) + (z[i + W] * (1 - fc) + z[i + W + 1] * fc) * fr;
+  };
+  const step = Math.ceil(Math.max(W, H) / (touchFirst ? 400 : 800));
+  const pct = (f) => (f >= 0.01 ? Math.round(f * 100) + ' %' : (f * 100).toFixed(1) + ' %');
+  const credit = Object.entries(meta.source_fraction || {})
+    .map(([k, f]) => `${SOURCE_NAMES[k] || k} (${pct(f)})`).join(', ');
+  return {
+    key: 'montauk',
+    origin: { lon: (meta.west + meta.east) / 2, lat: (meta.north + meta.south) / 2 },
+    spanE, spanN, nE: Math.floor((W - 1) / step) + 1, nN: Math.floor((H - 1) / step) + 1,
+    heightAt,
+    land: [[0, [0.80, 0.76, 0.58]], [3, [0.55, 0.64, 0.38]], [15, [0.38, 0.54, 0.30]], [48, [0.52, 0.47, 0.36]]],
+    sea: [[0, [0.62, 0.80, 0.82]], [-4, [0.42, 0.68, 0.78]], [-12, [0.22, 0.46, 0.66]], [-24, [0.10, 0.22, 0.44]]],
+    // from offshore in the south-east, looking north-west at the point
+    home: { bearingDeg: 300, elevationDeg: 30, factor: 0.75 },
+    about: `${meta.name}: ${(spanE / 1000).toFixed(1)} by ${(spanN / 1000).toFixed(1)} km, ` +
+      `${meta.cell_m.x.toFixed(1)} m cells, heights ${meta.range_m[0].toFixed(1)} to ${meta.range_m[1].toFixed(1)} m ` +
+      `${meta.vertical_datum}. Sources: ${credit}, fused with topobathykit.`,
+  };
+}
+
+let terrain = INVENTED;
+let terrainNote = '';
+const demCache = {};
+async function setTerrain(key) {
+  terrainNote = '';
+  if (key === 'montauk') {
+    try {
+      sel('scene-about').textContent = 'Loading the Montauk Point elevation grid...';
+      terrain = demCache[DEM_URL] || (demCache[DEM_URL] = await loadDem(DEM_URL));
+    } catch (err) {
+      console.warn('vantagekit demo: survey grid unavailable, using the invented coastline', err);
+      terrain = INVENTED;
+      terrainNote = 'The Montauk Point grid did not load, so this is the invented coastline. ';
+    }
+  } else {
+    terrain = INVENTED;
+  }
+  sel('scene').value = terrain.key;
+  sel('scene-about').textContent = terrainNote + terrain.about;
+}
+const heightAt = (east, north) => terrain.heightAt(east, north);
+
 function ramp(stops, h) {
   for (let i = 1; i < stops.length; i++) {
     const [h0, c0] = stops[i - 1], [h1, c1] = stops[i];
@@ -202,14 +295,15 @@ function build() {
   const mpu = +sel('scale').value, exag = +sel('exag').value;
   if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
   if (sea) { scene.remove(sea); sea.geometry.dispose(); }
-  const g = new THREE.PlaneGeometry(SPAN_M / mpu, SPAN_M / mpu, N - 1, N - 1);
+  const t = terrain;
+  const g = new THREE.PlaneGeometry(t.spanE / mpu, t.spanN / mpu, t.nE - 1, t.nN - 1);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position;
   const col = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
     const h = heightAt(pos.getX(i) * mpu, -pos.getZ(i) * mpu);
     pos.setY(i, (h * exag) / mpu);
-    col.set(h >= 0 ? ramp(LAND, h) : ramp(SEA, h), i * 3);
+    col.set(h >= 0 ? ramp(t.land, h) : ramp(t.sea, h), i * 3);
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.computeVertexNormals();
@@ -217,7 +311,7 @@ function build() {
   scene.add(mesh);
   // Sea surface at 0 m: translucent, so the seabed shows through and you can dive under it.
   sea = new THREE.Mesh(
-    new THREE.PlaneGeometry(SPAN_M / mpu, SPAN_M / mpu).rotateX(-Math.PI / 2),
+    new THREE.PlaneGeometry(t.spanE / mpu, t.spanN / mpu).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0x3a7fb0, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }),
   );
   sea.visible = sel('sea').checked;
@@ -237,7 +331,7 @@ function makeNav() {
   const mode = modes.includes(startMode) ? startMode : modes[0];
   nav = createVantage({
     THREE, CameraControls, camera, dom: canvas,
-    origin: ORIGIN, metresPerUnit: mpu,
+    origin: terrain.origin, metresPerUnit: mpu,
     exaggeration: () => builtExag,
     modes, mode,
     settingsKey: 'vantagekit-demo.fly',
@@ -249,6 +343,7 @@ function makeNav() {
     link: sel('link').checked && {
       app: {
         write(p) {
+          p.set('scene', terrain.key);
           p.set('modes', sel('modes').value);
           p.set('mode', nav.mode);
           p.set('mouse', sel('mouse').value);
@@ -308,9 +403,9 @@ function showMode() {
 }
 
 let lastInput = 'none', padName = 'none';
-// Home: from offshore in the south-west, looking north-east toward the coast.
+// Home: each terrain's own starting view.
 function frameHome() {
-  nav.fitBox(new THREE.Box3().setFromObject(mesh), { bearingDeg: 60, elevationDeg: 35, factor: 0.8 });
+  nav.fitBox(new THREE.Box3().setFromObject(mesh), terrain.home);
   nav.saveHome();
 }
 function frame() {
@@ -356,6 +451,16 @@ sel('exag').addEventListener('input', () => {
   nav.writeLink();
 });
 sel('sea').addEventListener('change', () => { sea.visible = sel('sea').checked; });
+// A new terrain has a new origin and extent: rebuild everything and start from its home view.
+sel('scene').addEventListener('change', async () => {
+  startMode = nav.mode;
+  await setTerrain(sel('scene').value);
+  build();
+  makeNav();
+  frameHome();
+  nav.applyLink();
+  nav.writeLink();
+});
 sel('link').addEventListener('change', () => remake());
 
 function resize() {
@@ -367,6 +472,7 @@ function resize() {
 addEventListener('resize', resize);
 
 resize();   // before framing: fitBox reads the aspect ratio
+await setTerrain(params.get('scene') === 'invented' ? 'invented' : 'montauk');
 frame();
 const clock = new THREE.Clock();
 let frames = 0;

@@ -1,8 +1,8 @@
 # vantagekit
 
-![The vantagekit demo: an invented 20 km coastline at 5x vertical exaggeration, with hills and a river valley on land, a translucent sea surface, a shelf cut by a submarine canyon, and an offshore island](docs/demo.png)
+![The vantagekit demo: Montauk Point, Long Island, at 5x vertical exaggeration, from offshore in the south-east, with the bluffs, Oyster Pond and the shoals east of the point, and the side panel listing the data sources and bindings](docs/demo.png)
 
-*The demo page, an invented coastline built in the page with no data service. The side panel lists the bindings and the live range, metres per pixel, bearing and pitch.*
+*The demo page on Montauk Point, Long Island: a 9.1 by 6.0 km topobathymetric grid at 3.8 m from NOAA survey data, served for the demo by [data.lhzn.io](https://data.lhzn.io). The Scene menu also offers an invented coastline built in the page with no data service. The side panel lists the sources, the bindings, and the live range, metres per pixel, bearing and pitch.*
 
 **[Open the live demo](https://lhzn-io.github.io/vantagekit/demo/)** (mouse, keyboard, gamepad or
 touch). `?mode=fly` starts in fly mode. A [MapLibre demo](https://lhzn-io.github.io/vantagekit/demo/maplibre.html)
