@@ -4,12 +4,12 @@
 // build on these pieces: angle helpers, a local geographic frame, the view state used in links,
 // the link codec, and the key and gamepad binding spec.
 //
-// Copyright (c) 2026 Long Horizon Observatory. MIT licence.
+// Copyright (c) 2026 Long Horizon Observatory. MIT license.
 
-export const VERSION = '0.7.0';
+export const VERSION = '0.8.0';
 export const LINK_VERSION = 1;
 
-/** Metres per degree of latitude used by the local frame (matches common viewer practice). */
+/** Meters per degree of latitude used by the local frame (matches common viewer practice). */
 export const DEG_TO_M = 111320;
 
 const D2R = Math.PI / 180;

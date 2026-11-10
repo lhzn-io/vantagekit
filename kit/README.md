@@ -39,5 +39,5 @@ see the [main README](https://github.com/lhzn-io/vantagekit#omniverse-kit).
 
 ## Versions
 
-The package version follows the repository's release tags, so `vantagekit==0.7.0` matches the
-JavaScript modules served from `@v0.7.0`. MIT licence, Long Horizon Observatory.
+The package version follows the repository's release tags, so `vantagekit==0.8.0` matches the
+JavaScript modules served from `@v0.8.0`. MIT license, Long Horizon Observatory.

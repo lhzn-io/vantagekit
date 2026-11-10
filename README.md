@@ -49,7 +49,7 @@ copy of three.js however it loads it. The MapLibre adapter (`vantagekit-maplibre
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.7.0/vantagekit-three.js"
+    "vantagekit/three": "https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.8.0/vantagekit-three.js"
   }
 }
 </script>
@@ -209,7 +209,7 @@ ratio.) `pinchFollowsFingers: false` keeps camera-controls' own rate.
 ```html
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script type="module">
-import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.7.0/vantagekit-maplibre.js';
+import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.8.0/vantagekit-maplibre.js';
 
 map.on('load', () => {
   const nav = createMapVantage({ maplibregl, map, fly: { minAltitude: 2 } });

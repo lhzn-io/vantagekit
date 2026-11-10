@@ -4,4 +4,4 @@ vantagekit.core is pure Python (tested without Kit); vantagekit.kit wraps it for
 This file imports neither, so importing the core never pulls in Kit.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
