@@ -126,7 +126,9 @@ if (touchFirst) {
   sel('sens-name').textContent = 'Fly touch look';
   Object.assign(sel('sens'), { min: 0.05, max: 1, step: 0.05 });
 }
-if (matchMedia('(max-width: 600px)').matches) sel('panel').open = false;
+// Folded on phones in either orientation (in landscape a phone is wider than 600 px, and the open
+// panel would cover the joystick) and on any narrow window.
+if (touchFirst || matchMedia('(max-width: 600px)').matches) sel('panel').open = false;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
