@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2026 Long Horizon Observatory. MIT license.
 
-export const VERSION = '0.8.0';
+export const VERSION = '0.8.1';
 export const LINK_VERSION = 1;
 
 /** Meters per degree of latitude used by the local frame (matches common viewer practice). */
