@@ -34,6 +34,12 @@ const PINCH_STEP = 1.25;   // finger spread ratio per fly speed step
 // the fingers' midpoint to one finger (half their separation). A dollySpeed of PINCH_K / separation
 // makes the view distance follow the finger ratio: fingers twice as far apart, half the distance.
 const PINCH_K = 16 / -Math.log(0.95);
+// Double-click or double-tap to place the pivot: each press is released within TAP_MS and TAP_PX
+// of where it began, and the second follows the first within DOUBLE_MS and DOUBLE_PX.
+const TAP_MS = 300;
+const TAP_PX = 6;
+const DOUBLE_MS = 400;
+const DOUBLE_PX = 24;
 
 function isEditable(t) {
   return !!t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName || ''));
@@ -70,6 +76,9 @@ const clamp1 = (v) => Math.max(-1, Math.min(1, v));
  *   ACTION values); by default they follow the mouse preset: 'rotate-left' rotates with one finger
  *   and pans with two, 'pan-left' pans with one finger and rotates and tilts with two
  * @param {number} [o.minDistance] scene units; the wheel pushes the orbit point ahead past it
+ * @param {Function|{pick?:Function, objects?:Array|Function, center?:boolean}} [o.pivotPick] double-click
+ *   or double-tap in orbit mode moves the pivot to the point under the pointer: pick(ndc, event)
+ *   returns it (or null), or `objects` are ray cast; see setPivotPick
  * @param {number} [o.maxDistance=Infinity]
  * @param {number} [o.maxPolarAngle=0.85*PI]
  * @param {boolean|'focus'} [o.keys=true] keyboard input: true listens on the page, 'focus' only
@@ -215,6 +224,12 @@ export class Vantage extends EventTarget {
     this._pivotShow = 0;        // seconds-weighted visibility, 1 = fully shown
     this.pivotMarker = null;
     if (o.pivotMarker) this._buildPivotMarker(o.pivotMarker === true ? {} : o.pivotMarker);
+    // Pivot pick: a double-click or double-tap in orbit mode moves the pivot to the point the page
+    // reports under the pointer. Tap state: the press being watched, and the last completed tap.
+    this._pivotPick = null;
+    this._tap = null;
+    this._lastTap = null;
+    if (o.pivotPick) this.setPivotPick(o.pivotPick);
 
     this._listeners = [];
     // keys: true listens on the whole page; 'focus' only while the viewer element has focus (a
@@ -248,6 +263,9 @@ export class Vantage extends EventTarget {
       this._on(window, 'pointerup', (e) => { this._fly.dragging = false; this._touchUp(e); });
       this._on(window, 'pointercancel', (e) => { this._fly.dragging = false; this._touchUp(e); });
       this._on(this.dom, 'wheel', (e) => this._flyWheel(e), { passive: false });
+      this._on(this.dom, 'pointerdown', (e) => this._tapDown(e));
+      this._on(window, 'pointerup', (e) => this._tapUp(e));
+      this._on(window, 'pointercancel', () => { this._tap = null; this._lastTap = null; });
     }
     if (start === 'fly') this.setMode('fly', { lock: false });
     this._syncStick();
@@ -484,6 +502,96 @@ export class Vantage extends EventTarget {
     if (emit) this._emit('pivot', { mode });
   }
 
+  /**
+   * Turn on (or, with null, off) placing the pivot by a double-click or double-tap in orbit mode.
+   * `spec` is a function (ndc, event) -> point or null, where ndc is { x, y } in -1..1 over the
+   * viewer element; or { pick, objects, center }: `objects` (an array of Object3Ds, or a function
+   * returning one) are ray cast instead of `pick`, and `center: false` keeps the view as it is
+   * (only the pivot moves) instead of turning to center the point.
+   */
+  setPivotPick(spec) {
+    if (!spec) { this._pivotPick = null; return; }
+    const s = typeof spec === 'function' ? { pick: spec } : spec;
+    let pick = s.pick;
+    if (!pick && s.objects) {
+      const rc = new this.THREE.Raycaster();
+      pick = (ndc) => {
+        const objs = typeof s.objects === 'function' ? s.objects() : s.objects;
+        if (!objs || !objs.length) return null;
+        rc.setFromCamera(ndc, this.camera);
+        const hit = rc.intersectObjects(objs, true)[0];
+        return hit ? hit.point : null;
+      };
+    }
+    if (typeof pick !== 'function') throw new Error('vantagekit: pivotPick needs a pick function or objects');
+    this._pivotPick = { pick, center: s.center ?? true };
+  }
+
+  /**
+   * Move the orbit pivot to `point` (scene units) in orbit mode. center (default): the eye stays
+   * and the view turns to put the point in the middle, eased when `animate`; nearer than
+   * minDistance, or outside the polar limits, the eye moves back along the line or around the point
+   * until it is within them. center false: the view does not change; only the pivot moves.
+   * Shows the pivot marker and emits 'pivotplace'.
+   */
+  placePivot(point, { animate = true, center = true } = {}) {
+    const [x, y, z] = xyz(point);
+    if (this.mode !== 'orbit' || !Number.isFinite(x + y + z)) return Promise.resolve();
+    const T = this.THREE, c = this.controls;
+    const target = new T.Vector3(x, y, z);
+    let done;
+    if (!center) {
+      c.setOrbitPoint(x, y, z);
+      done = Promise.resolve();
+    } else {
+      // The camera's own position: a focal offset (left by setOrbitPoint) puts it away from
+      // getPosition(). The offset eases to zero with the turn.
+      const s = new T.Spherical().setFromVector3(this.camera.position.clone().sub(target));
+      if (!(s.radius > 0)) return Promise.resolve();
+      s.radius = Math.min(Math.max(s.radius, c.minDistance), c.maxDistance);
+      s.phi = Math.min(Math.max(s.phi, c.minPolarAngle), c.maxPolarAngle);
+      s.makeSafe();
+      const eye = new T.Vector3().setFromSpherical(s).add(target);
+      c.setFocalOffset(0, 0, 0, animate);
+      done = c.setLookAt(eye.x, eye.y, eye.z, x, y, z, animate);
+    }
+    if (this._pivotOpts) this._pivotShow = 1 + this._pivotOpts.fadeTime;
+    this._linkDirty = true;
+    this._emit('pivotplace', { point: [x, y, z], center });
+    return done;
+  }
+
+  // A tap is a press released within TAP_MS and TAP_PX of where it began; two taps within
+  // DOUBLE_MS and DOUBLE_PX of each other place the pivot. A second finger cancels both.
+  _tapDown(e) {
+    if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) { this._tap = null; this._lastTap = null; return; }
+    this._tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp };
+  }
+
+  _tapUp(e) {
+    const d = this._tap;
+    if (!d || d.id !== e.pointerId) return;
+    this._tap = null;
+    if (!this._pivotPick || this.mode !== 'orbit' || !this._enabled) { this._lastTap = null; return; }
+    const t = e.timeStamp;
+    if (t - d.t > TAP_MS || Math.hypot(e.clientX - d.x, e.clientY - d.y) > TAP_PX) { this._lastTap = null; return; }
+    const l = this._lastTap;
+    if (l && t - l.t <= DOUBLE_MS && Math.hypot(e.clientX - l.x, e.clientY - l.y) <= DOUBLE_PX) {
+      this._lastTap = null;
+      this._pickPivot(e);
+    } else {
+      this._lastTap = { x: e.clientX, y: e.clientY, t };
+    }
+  }
+
+  _pickPivot(e) {
+    const r = this.dom && this.dom.getBoundingClientRect ? this.dom.getBoundingClientRect() : null;
+    if (!r || !(r.width > 0) || !(r.height > 0)) return;
+    const ndc = { x: ((e.clientX - r.left) / r.width) * 2 - 1, y: -((e.clientY - r.top) / r.height) * 2 + 1 };
+    const p = this._pivotPick.pick(ndc, e);
+    if (p) this.placePivot(p, { center: this._pivotPick.center });
+  }
+
   _buildPivotMarker(opts) {
     const T = this.THREE;
     if (!T.RingGeometry || !T.Group) return;
@@ -670,6 +778,7 @@ export class Vantage extends EventTarget {
       { gesture: 'One-finger drag', orbit: rot ? 'rotate' : 'pan', fly: 'look around' },
       { gesture: 'Pinch', orbit: fixed ? 'zoom' : 'zoom toward the fingers', fly: 'speed (spread is faster)' },
       { gesture: 'Two-finger drag', orbit: fixed ? undefined : rot ? 'pan' : 'rotate and tilt', fly: stick ? undefined : 'move, like a stick held away from where it began' },
+      ...(this._pivotPick ? [{ gesture: 'Double-tap', orbit: 'turn about the point tapped' }] : []),
     ];
     return rows.map((r) => ({
       gesture: r.gesture,

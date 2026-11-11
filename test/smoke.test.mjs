@@ -583,6 +583,78 @@ test('pivot marker sits on the orbit point at a constant screen size and fades o
   assert.equal(v.pivotMarker, null);
 });
 
+test('placePivot turns about a picked point; a double-click or double-tap picks it', () => {
+  const v = make({ metersPerUnit: 1, minDistance: 2, pivotMarker: true });
+  v.setLookAt([0, 10, 20], [0, 0, 0]);
+  v.update(0);
+  const eye0 = v.camera.position.clone();
+  // center (default): the eye stays, the view turns to the point
+  v.placePivot([5, 0, -5], { animate: false });
+  v.update(0);
+  close(v.camera.position.distanceTo(eye0), 0, 1e-6);
+  close(v.getTarget().distanceTo(new THREE.Vector3(5, 0, -5)), 0, 1e-6);
+  assert.equal(v.pivotMarker.visible, true);                   // the marker shows where it went
+  // nearer than minDistance: the eye backs off along the line
+  v.placePivot(eye0.clone().add(new THREE.Vector3(0, -1, 0)), { animate: false });
+  v.update(0);
+  close(v.camera.position.distanceTo(v.getTarget()), 2, 1e-6);
+  // center false: the view does not change, only the pivot moves
+  v.setLookAt([0, 10, 20], [0, 0, 0]);
+  v.update(0);
+  const dir0 = v.camera.getWorldDirection(new THREE.Vector3());
+  v.placePivot([3, 0, 1], { center: false });
+  v.update(0);
+  close(v.camera.position.distanceTo(eye0), 0, 1e-6);
+  close(v.camera.getWorldDirection(new THREE.Vector3()).dot(dir0), 1, 1e-6);
+  close(v.getTarget().distanceTo(new THREE.Vector3(3, 0, 1)), 0, 1e-6);
+
+  // Gestures: no DOM here, so the viewer element is a stand-in and the pointer events are driven by hand.
+  v.dom = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }) };
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial());
+  ground.updateMatrixWorld();
+  const placed = [];
+  v.addEventListener('pivotplace', (e) => placed.push(e.detail.point));
+  v.setPivotPick({ objects: () => [ground] });
+  const click = (x, y, t, o = {}) => {
+    const ev = { pointerId: 1, isPrimary: true, pointerType: 'mouse', button: 0, clientX: x, clientY: y, ...o };
+    v._tapDown({ ...ev, timeStamp: t });
+    v._tapUp({ ...ev, timeStamp: t + 80 });
+  };
+  v.controls.setFocalOffset(0, 0, 0);                          // setLookAt keeps the offset center: false left
+  v.setLookAt([0, 10, 20], [0, 0, 0]);
+  v.update(0);
+  click(100, 50, 0);
+  click(100, 50, 2000);                                        // too late after the first: not a double
+  click(160, 50, 2300);                                        // too far from the second
+  assert.equal(placed.length, 0);
+  click(100, 50, 3000);
+  click(100, 50, 3300);                                      // a double-click at the center of the view
+  assert.equal(placed.length, 1);
+  close(placed[0][1], 0, 1e-6);                                // on the ground
+  close(placed[0][0], 0, 1e-3);
+  click(100, 50, 5000, { button: 2 });
+  click(100, 50, 5200, { button: 2 });                         // right button: never
+  click(100, 50, 6000, { pointerType: 'touch', button: 0 });
+  v._tapDown({ pointerId: 2, isPrimary: false, pointerType: 'touch', clientX: 120, clientY: 50, timeStamp: 6100 });
+  click(100, 50, 6200, { pointerType: 'touch', button: 0 });   // a second finger between: a gesture
+  assert.equal(placed.length, 1);
+  click(100, 50, 7000, { pointerType: 'touch' });
+  click(100, 50, 7200, { pointerType: 'touch' });              // a double-tap
+  assert.equal(placed.length, 2);
+  assert.ok(v.touchBindings.some((r) => r.gesture === 'Double-tap'));
+  v.setPivotPick(() => null);                                  // the page declines: nothing moves
+  click(100, 50, 9000); click(100, 50, 9200);
+  assert.equal(placed.length, 2);
+  v.setMode('fly');
+  v.setPivotPick({ objects: [ground] });
+  click(100, 50, 10000); click(100, 50, 10200);                // never in fly mode
+  assert.equal(placed.length, 2);
+  v.setPivotPick(null);
+  assert.ok(!v.touchBindings.some((r) => r.gesture === 'Double-tap'));
+  assert.throws(() => v.setPivotPick({ center: false }), /pick function or objects/);
+  v.dispose();
+});
+
 test('the 0.7 British-spelled names still work until 0.9.0, each with one warning', () => {
   const warned = [];
   const orig = console.warn;

@@ -349,6 +349,9 @@ function makeNav() {
     mouse: sel('mouse').value,
     pivot: sel('pivot').value,
     pivotMarker: true,
+    // Double-click or double-tap the land, the seabed or the sea to turn about that point. The ray
+    // cast does not skip hidden objects, so the sea counts only while it is shown.
+    pivotPick: { objects: () => (sea.visible ? [sea, mesh] : [mesh]) },
     link: sel('link').checked && {
       app: {
         write(p) {
@@ -402,10 +405,10 @@ function showMode() {
   const speed = `speed x${flySpeed.toFixed(flySpeed < 1 ? 2 : 1)}`;
   sel('mode-hint').textContent = !fly
     ? (nav.pivot === 'fixed'
-      ? (touchFirst ? 'Orbit, fixed pivot: drag to turn about it, pinch to zoom.'
-        : 'Orbit, fixed pivot: drag or WASD to turn about it, the wheel or Q/E zoom.')
-      : touchFirst ? 'Orbit: drag to turn the scene, pinch to zoom, two fingers to pan.'
-        : 'Orbit: drag to turn the scene, the wheel zooms, WASD moves.')
+      ? (touchFirst ? 'Orbit, fixed pivot: drag to turn about it, pinch to zoom, double-tap to move it.'
+        : 'Orbit, fixed pivot: drag or WASD to turn about it, the wheel or Q/E zoom, double-click to move it.')
+      : touchFirst ? 'Orbit: drag to turn the scene, pinch to zoom, two fingers to pan, double-tap to turn about a point.'
+        : 'Orbit: drag to turn the scene, the wheel zooms, WASD moves, double-click to turn about a point.')
     : touchFirst && nav.joystick
       ? `Fly: the stick moves you, drag anywhere else to look, pinch for speed (${speed}).`
     : touchFirst

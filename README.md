@@ -131,6 +131,17 @@ draws a ring at the pivot while an orbit drag, a key or a stick turns or zooms t
 size on screen, and fades it after release. The page adds `nav.pivotMarker` to its scene; `dispose()`
 removes it. While it shows or fades, `update()` returns `true`, so on-demand renderers keep drawing.
 
+`pivotPick` lets the viewer move the pivot to a point in the scene by a double-click (left button) or
+a double-tap, in orbit mode and with either pivot setting. vantagekit has no scene of its own, so the
+page says what was hit: `pivotPick: { objects: [terrain, sea] }` (an array, or a function returning
+one) ray casts them, or `pivotPick: (ndc, event) => point` (ndc is `{ x, y }` in -1..1 over the
+viewer element) returns a point or `null`, for example to cast against a plane or to ignore the
+gesture while the page uses clicks for something else. By default the eye stays where it is and the
+view turns, with the usual easing, to put the point in the middle; `center: false` keeps the view
+and moves only the pivot. A point nearer than `minDistance` backs the eye off along the line. The
+marker shows at the new pivot. `placePivot(point, { animate, center })` does the same from code, and
+`setPivotPick(spec)` changes or (with `null`) removes the gesture at run time.
+
 ## Object viewers
 
 The defaults suit terrain: the gamepad's left stick and triggers move the orbit point, zoom runs
@@ -254,6 +265,7 @@ in the MapLibre adapter yet.
 | `setMode(mode)`, `mode`, `modes` | Switch between the page's modes; the current and offered modes |
 | `stepFlySpeed(steps)`, `setFlySpeed(multiplier)`, `flySpeed`, `turn(rightDeg, upDeg)`, `setFlySettings(partial)` | Fly speed, look and settings from your own controls |
 | `setPivot(mode)`, `pivot`, `pivotMarker` | Fixed or free orbit pivot, and the marker object to add to the scene |
+| `placePivot(point, { animate, center })`, `setPivotPick(spec)` | Move the pivot to a point; the double-click and double-tap that pick one |
 | `setJoystick(side)`, `joystick` | Show the fly mode on-screen stick bottom `left` or `right`, or remove it (`null`) |
 | `setSurface(fn)` | Set the surface height lookup used for fly speed |
 | `rescaleVertical(prev, next, anchorY)` | Keep a point steady when the exaggeration changes |
@@ -266,7 +278,7 @@ in the MapLibre adapter yet.
 
 Events: `move`, `rest`, `input` (`mouse`, `touch`, `keyboard` or `gamepad`), `gamepad` (connected or
 disconnected), `link` (URL rewritten), `modechange`, `speed` (fly speed multiplier changed),
-`recover` (a non-finite camera was reset to the last good view), `joystick` (side changed), `pivot` (pivot mode changed).
+`recover` (a non-finite camera was reset to the last good view), `joystick` (side changed), `pivot` (pivot mode changed), `pivotplace` (the pivot moved to a picked point).
 
 Renamed in 0.8.0, to match the Python package and USD's `metersPerUnit`: `metresPerUnit` is now
 `metersPerUnit` (option, property and `localFrame`), `rangeMetres()` is `rangeMeters()`, and
