@@ -130,6 +130,9 @@ uses the object mapping below. Home, `setView`, links and leaving fly mode still
 draws a ring at the pivot while an orbit drag, a key or a stick turns or zooms the view, at a constant
 size on screen, and fades it after release. The page adds `nav.pivotMarker` to its scene; `dispose()`
 removes it. While it shows or fades, `update()` returns `true`, so on-demand renderers keep drawing.
+`whileMoving: false` shows the ring only while the view turns about a still point: whenever the pivot
+itself moves (a pan, the move keys or left stick, a zoom that carries the pivot, a pivot pick's glide,
+or the easing after any of them), it hides at once.
 
 `pivotPick` lets the viewer move the pivot to a point in the scene by a double-click (left button) or
 a double-tap, in orbit mode and with either pivot setting. vantagekit has no scene of its own, so the

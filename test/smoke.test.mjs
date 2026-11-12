@@ -552,6 +552,34 @@ test("pivot: 'fixed' keeps the orbit point; keys turn and zoom; 'free' restores 
   v.dispose(); p.dispose();
 });
 
+test("pivotMarker whileMoving: false hides the ring while the pivot moves, shows it while the view turns", () => {
+  for (const whileMoving of [false, true]) {
+    const v = make({ metersPerUnit: 1, pivotMarker: { whileMoving } });
+    const g = v.pivotMarker;
+    v.setLookAt([0, 0, 20], [0, 0, 0]);
+    v.update(0.02);
+    v._onControlStart();                                         // a drag begins
+    v.update(0.02);
+    assert.equal(g.visible, true, `still pivot, whileMoving ${whileMoving}`);
+    v.controls.rotate(0.3, 0, false);                            // turning about the pivot
+    v.update(0.02);
+    assert.equal(g.visible, true, `turning, whileMoving ${whileMoving}`);
+    v.controls.truck(2, 0, false);                               // a pan carries the pivot
+    v.update(0.02);
+    assert.equal(g.visible, whileMoving, `panning, whileMoving ${whileMoving}`);
+    v.update(0.02);                                              // still dragging, pivot still for 20 ms
+    assert.equal(g.visible, whileMoving, `just after the pan, whileMoving ${whileMoving}`);
+    run(v, 0.3);                                                 // still for 0.3 s: a turn shows it again
+    assert.equal(g.visible, true, `pivot still again, whileMoving ${whileMoving}`);
+    v.controls.truck(2, 0, false);                               // a pan, then release mid-move
+    v.update(0.02);
+    v._onControlEnd();
+    run(v, 0.3);
+    assert.equal(g.visible, whileMoving, `after releasing a pan, whileMoving ${whileMoving}`);
+    v.dispose();
+  }
+});
+
 test('pivot marker sits on the orbit point at a constant screen size and fades out after a turn', () => {
   const v = make({ metersPerUnit: 1, pivotMarker: { sizePx: 40, fadeTime: 0.5 } });
   const g = v.pivotMarker;

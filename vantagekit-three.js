@@ -29,6 +29,7 @@ const FLY_DEFAULTS = {
   joystickCurve: null, // stick response curve power; null uses `curve` (1 is linear, higher is finer near the center)
 };
 const SETTING_KEYS = ['sensitivity', 'invertY', 'curve', 'touchSensitivity', 'joystick', 'joystickCurve'];
+const PIVOT_STILL_S = 0.2;   // pivotMarker whileMoving: false: how long the pivot must be still before the ring shows
 const PINCH_STEP = 1.25;   // finger spread ratio per fly speed step
 // camera-controls zooms a pinch by 0.95^(-dSpan * dollySpeed / 8), where span is the distance from
 // the fingers' midpoint to one finger (half their separation). A dollySpeed of PINCH_K / separation
@@ -212,7 +213,13 @@ export class Vantage extends EventTarget {
       this._setInput(this._pointerType === 'touch' ? 'touch' : 'mouse');
       this._orbitDragging = true;
     };
-    this._onControlEnd = () => { this._orbitDragging = false; this._pivotShow = Math.max(this._pivotShow, 1); };
+    this._onControlEnd = () => {
+      this._orbitDragging = false;
+      // a release after a turn holds the ring for a moment; after a pan (whileMoving: false) it stays hidden
+      if (this._pivotOpts?.whileMoving !== false || (this._pivotStillFor ?? Infinity) >= PIVOT_STILL_S) {
+        this._pivotShow = Math.max(this._pivotShow, 1);
+      }
+    };
     this._onRest = () => this._emit('rest');
     c.addEventListener('controlstart', this._onControlStart);
     c.addEventListener('controlend', this._onControlEnd);
@@ -595,7 +602,7 @@ export class Vantage extends EventTarget {
   _buildPivotMarker(opts) {
     const T = this.THREE;
     if (!T.RingGeometry || !T.Group) return;
-    this._pivotOpts = { color: 0xdecf03, sizePx: 28, fadeTime: 0.6, ...opts };
+    this._pivotOpts = { color: 0xdecf03, sizePx: 28, fadeTime: 0.6, whileMoving: true, ...opts };
     const mat = new T.MeshBasicMaterial({
       color: this._pivotOpts.color, transparent: true, opacity: 0, depthTest: false, depthWrite: false, side: T.DoubleSide,
     });
@@ -622,12 +629,26 @@ export class Vantage extends EventTarget {
     if (!g) return false;
     if (this.mode !== 'orbit' || !this._enabled) { g.visible = false; this._pivotShow = 0; return false; }
     const was = g.visible;
-    if (this._orbitDragging) this._pivotShow = 1 + this._pivotOpts.fadeTime;   // hold, then fade after release
+    const t = this.controls.getTarget(new this.THREE.Vector3());
+    // whileMoving: false shows the ring only while the view turns about a still point. A pan, the
+    // move keys or left stick, a zoom that carries the point, a pivot pick's glide, or the easing
+    // after any of them hides it at once, and the pivot must then stay still for PIVOT_STILL_S before
+    // the ring can show again. (camera-controls applies pointer moves on alternate frames, so a
+    // one-frame test would flicker during a pan.)
+    let still = true;
+    if (this._pivotOpts.whileMoving === false) {
+      const last = this._pivotLast;
+      const moved = last && last.distanceTo(t) > 1e-4 * Math.max(this.camera.position.distanceTo(t), 1e-9);
+      (this._pivotLast ||= new this.THREE.Vector3()).copy(t);
+      this._pivotStillFor = moved ? 0 : (this._pivotStillFor ?? Infinity) + step;
+      still = this._pivotStillFor >= PIVOT_STILL_S;
+      if (moved) this._pivotShow = 0;
+    }
+    if (this._orbitDragging && still) this._pivotShow = 1 + this._pivotOpts.fadeTime;   // hold, then fade after release
     else this._pivotShow = Math.max(0, this._pivotShow - step);
-    const a = Math.min(1, this._pivotShow / this._pivotOpts.fadeTime);
+    const a = still ? Math.min(1, this._pivotShow / this._pivotOpts.fadeTime) : 0;
     g.visible = a > 0;
     if (!g.visible) return was;
-    const t = this.controls.getTarget(new this.THREE.Vector3());
     g.position.copy(t);
     g.quaternion.copy(this.camera.quaternion);
     const dist = this.camera.position.distanceTo(t);
