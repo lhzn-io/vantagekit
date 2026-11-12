@@ -24,7 +24,7 @@ function make(opts = {}) {
 }
 
 test('module loads without a GPU or DOM', () => {
-  assert.equal(VERSION, '0.8.1');
+  assert.equal(VERSION, '0.8.2');
   const v = make();
   assert.ok(v.controls);
   v.dispose();
