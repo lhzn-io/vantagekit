@@ -1,0 +1,62 @@
+name: Deploy Docs
+
+# Builds the Sphinx site and deploys it to GitHub Pages at vantagekit.docs.lhzn.io. The demo pages
+# and the three modules they import ('../vantagekit-three.js' and so on) are copied into the site,
+# so the demo runs at /demo/ against the modules of the same commit.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "demo/**"
+      - "kit/exts/lhzn.vantagekit/vantagekit/**"
+      - "vantagekit*.js"
+      - "README.md"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Sphinx dependencies
+        run: pip install -r docs/requirements-docs.txt
+
+      - name: Build HTML docs
+        run: sphinx-build -W --keep-going -b html docs/source docs/build/html
+
+      - name: Add the demo and the modules it imports
+        run: |
+          cp -r demo docs/build/html/demo
+          cp vantagekit.js vantagekit-three.js vantagekit-maplibre.js docs/build/html/
+          test -f docs/build/html/demo/index.html
+          test -f docs/build/html/demo/maplibre.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -27,7 +27,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Demo = "https://lhzn-io.github.io/vantagekit/demo/"
+Demo = "https://vantagekit.docs.lhzn.io/demo/"
+Documentation = "https://vantagekit.docs.lhzn.io/"
 Issues = "https://github.com/lhzn-io/vantagekit/issues"
 Source = "https://github.com/lhzn-io/vantagekit"
 
