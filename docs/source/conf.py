@@ -19,7 +19,6 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
-    "sphinx_rtd_theme",
     "myst_parser",
 ]
 
@@ -38,12 +37,15 @@ exclude_patterns: list[str] = []
 
 language = "en"
 
-html_theme = "sphinx_rtd_theme"
+html_theme = "lhzn"
 html_title = f"vantagekit {release}"
 html_logo = "../logo.svg"
 html_favicon = "../../demo/favicon.svg"
-html_static_path = ["_static"]
-html_css_files = ["custom.css"]
+html_theme_options = {
+    "source_repository": "https://github.com/lhzn-io/vantagekit",
+    "source_branch": "main",
+    "source_directory": "docs/source/",
+}
 # CNAME for the custom domain vantagekit.docs.lhzn.io, copied to the site root.
 html_extra_path = ["_extra"]
 html_show_sourcelink = False
