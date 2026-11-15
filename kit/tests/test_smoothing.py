@@ -39,8 +39,9 @@ def test_smoothed3_independent_of_frame_rate(n):
 
 
 def test_smoothed3_lag_does_not_depend_on_frame_times():
-    """A boat at 15 m/s, frames alternating 37 and 52 ms (slop-fest, 2026-11-09): the lag
-    settles at v tau and stays there; a plain blend toward the newest target swung by 8 cm."""
+    """A boat at 15 m/s, frames alternating 37 and 52 ms (measured in an Isaac Sim viewer,
+    2026-11-09): the lag settles at v tau and stays there; a plain blend toward the newest
+    target swung by 8 cm."""
     s = Smoothed3(tau=0.05)
     t, v = 0.0, 15.0
     s.snap((0.0, 0.0, 0.0))

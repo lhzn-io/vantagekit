@@ -14,9 +14,10 @@ A plain blend toward the newest target (y += alpha (x1 - y)) treats the target a
 jumped at the start of the frame. For a target moving at speed v its lag is then
 v dt exp(-dt/tau) / (1 - exp(-dt/tau)), which depends on dt when dt is near tau: with
 tau 0.05 s it lagged 0.034 s at 37 ms frames and 0.028 s at 52 ms, so a chase camera
-behind a boat at 15 m/s jumped by about 8 cm whenever the frame time changed (slop-fest,
-2026-11-09). With the hold the lag is v tau at any frame time, and N frames of dt/N reach
-the same value as one frame of dt for any target that moves in a straight line.
+behind a boat at 15 m/s jumped by about 8 cm whenever the frame time changed (measured in
+an Isaac Sim viewer, 2026-11-09). With the hold the lag is v tau at any frame time, and N
+frames of dt/N reach the same value as one frame of dt for any target that moves in a
+straight line.
 """
 
 from __future__ import annotations
