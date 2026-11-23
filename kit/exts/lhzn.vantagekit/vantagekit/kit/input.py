@@ -73,6 +73,20 @@ class InputRouter:
         self.mouse_gate = None
         self._sub = self._input.subscribe_to_input_events(self._on_event, order=order)
         self._pad_sub = self._input.subscribe_to_gamepad_connection_events(self._on_pad)
+        # The app window's mouse, polled each frame (poll). In Isaac Sim 6.2 (Kit 110) mouse
+        # events over the viewport reach neither the subscription above nor one on the window's
+        # own mouse (a whole session showed one move event and no button or drag), while the
+        # polled button and position follow the pointer (2026-11-22). With an app window the
+        # drag and the wheel come from polling and mouse events are ignored; without one
+        # (headless tests) they come from events.
+        self._mouse = None
+        self._left_was_down = False
+        try:
+            import omni.appwindow
+
+            self._mouse = omni.appwindow.get_default_app_window().get_mouse()
+        except Exception:  # noqa: BLE001  (no app window)
+            self._mouse = None
 
     # events -------------------------------------------------------------------
     def _on_pad(self, e) -> None:
@@ -91,7 +105,7 @@ class InputRouter:
         if dt == carb.input.DeviceType.KEYBOARD:
             return self._on_key(event.event)
         if dt == carb.input.DeviceType.MOUSE:
-            return self._on_mouse(event.event)
+            return True if self._mouse is not None else self._on_mouse(event.event)
         return True  # gamepad: polled in poll()
 
     def _on_key(self, e) -> bool:
@@ -130,7 +144,34 @@ class InputRouter:
         return not (self._consume and claimed)
 
     # per frame ----------------------------------------------------------------
+    def _poll_mouse(self) -> None:
+        """Drag and wheel from the polled mouse. A drag starts only when the left button goes
+        down with the pointer in the window (and mouse_gate allows it), so a press that began
+        elsewhere never orbits; it ends when the button is released or the gate closes."""
+        get = self._input.get_mouse_value
+        mi = carb.input.MouseInput
+        down = float(get(self._mouse, mi.LEFT_BUTTON)) > 0.5
+        xy = self._input.get_mouse_coords_normalized(self._mouse)
+        x, y = float(xy.x), float(xy.y)
+        inside = 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
+        gate = self.mouse_gate is None or bool(self.mouse_gate())
+        if down and not self._left_was_down:
+            self._drag_from = (x, y) if inside and gate else None
+        elif not down or not gate:
+            self._drag_from = None
+        elif self._drag_from is not None:
+            self.state.add_delta("mouse:DRAG_X", x - self._drag_from[0])
+            self.state.add_delta("mouse:DRAG_Y", y - self._drag_from[1])
+            self._drag_from = (x, y)
+        self._left_was_down = down
+        if inside and gate:
+            wheel = float(get(self._mouse, mi.SCROLL_UP)) - float(get(self._mouse, mi.SCROLL_DOWN))
+            if wheel:
+                self.state.add_delta("mouse:WHEEL", wheel)
+
     def poll(self, dt: float) -> Frame:
+        if self._mouse is not None:
+            self._poll_mouse()
         if self._pads:
             gp = self._pads[0]
             get = self._input.get_gamepad_value

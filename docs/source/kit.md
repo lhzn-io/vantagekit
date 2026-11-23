@@ -22,6 +22,12 @@
 - **Bindings as data.** Bindings are records with press, hold, axis and delta kinds and exact
   modifiers. They sit in ordered layers, so an app layer (vessel controls, for example) can take
   the sticks from the camera while it is on. `help_rows()` lists them for a help panel.
+- **Mouse by polling.** The router reads the app window's mouse each frame (left button,
+  position, wheel) instead of waiting for mouse events. In Isaac Sim 6.2 (Kit 110) the mouse
+  events over the viewport reached neither the app-wide input subscription nor one on the
+  window's own mouse, so a drag never orbited, while the polled state followed the pointer. A
+  drag starts only when the left button goes down inside the window. Without an app window
+  (headless), mouse events are used as before.
 - **Pop-ups with their own view.** Input comes from carb for the whole app, so a drag in another
   window would also move the camera. Set `controls.router.mouse_gate` to a function that
   returns False while the pointer is over such a window; the mouse is ignored then.
