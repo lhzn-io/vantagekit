@@ -341,6 +341,10 @@ export class Vantage extends EventTarget {
 
   _pollPad() {
     if (!this._padOn || typeof navigator === 'undefined' || !navigator.getGamepads) return null;
+    // Chromium hands gamepad state to every visible page, focused or not, so a page beside
+    // another app (a Kit viewer, a second browser window) would move with the same pad. Like the
+    // keys, the pad only counts while this page has focus.
+    if (typeof document !== 'undefined' && document.hasFocus && !document.hasFocus()) return null;
     let gp = null;
     for (const g of navigator.getGamepads()) {
       if (g && g.connected && g.mapping === 'standard') { gp = g; break; }

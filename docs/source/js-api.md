@@ -54,7 +54,7 @@ page keeps a single copy of three.js however it loads it.
 | `smoothTime` | `0.25` | camera-controls smoothing time, in seconds. |
 | `keys` | `true` | Keyboard: `true` listens on the page, `'focus'` only while the viewer element has focus, `false` is off; see {doc}`keyboard-scope`. |
 | `bindings` | `DEFAULT_BINDINGS` | Key and pad bindings table. |
-| `gamepad` | `true` | Read a standard-mapping gamepad. |
+| `gamepad` | `true` | Read a standard-mapping gamepad while the page has focus (Chromium passes the pad to every visible page, so a page beside another app would otherwise move with it). |
 | `pad` | `'map'` | Orbit gamepad mapping: `'map'` moves the orbit point with the left stick and the triggers, `'object'` turns with both sticks and zooms with the triggers. Fly mode is the same for both. |
 | `padZoomRate` | `1.2` | `'object'` trigger zoom: full trigger scales the distance by `exp(-rate)` per second. |
 | `deadzone` | `0.15` | Radial stick dead zone. |
@@ -397,7 +397,7 @@ Create a navigation controller for a MapLibre map. See {doc}`maplibre`.
 | `mode` | first of `modes` | Starting mode. |
 | `keys` | `'focus'` | Keyboard: `'focus'` while the map canvas has focus, `true` on the page. |
 | `bindings` | `DEFAULT_BINDINGS` | Key and pad bindings table. |
-| `gamepad` | `true` | Read a standard-mapping gamepad. |
+| `gamepad` | `true` | Read a standard-mapping gamepad while the page has focus (Chromium passes the pad to every visible page, so a page beside another app would otherwise move with it). |
 | `deadzone` | `0.15` | Radial stick dead zone. |
 | `lookRateDeg` | `90` | Right-stick turn rate in orbit mode, degrees per second. |
 | `speed` | `{ rangeFactor: 0.5, minMps: 0.5, zoomPerSec: 1 }` | Movement speed: `mps` fixed, or a fraction of the view range or height per second; `zoomPerSec` for Q/E in orbit mode. |

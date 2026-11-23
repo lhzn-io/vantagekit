@@ -487,6 +487,9 @@ test("pad: 'object' turns with both sticks and zooms with the triggers; 'map' mo
     obj.update(0);
     const az0 = obj.controls.azimuthAngle, t0 = obj.getTarget().toArray();
     pad.axes = [1, 0, 0, 0];                            // left stick right: turn, not pan
+    globalThis.document = { hasFocus: () => false };    // another window has focus: the pad is ignored
+    try { run(obj, 1); } finally { delete globalThis.document; }
+    close(obj.controls.azimuthAngle, az0, 1e-9);
     run(obj, 1);
     close(Math.abs(obj.controls.azimuthAngle - az0), Math.PI / 2, 0.05);   // 90 deg/s
     assert.deepEqual(obj.getTarget().toArray().map((v) => +v.toFixed(6)), t0.map((v) => +v.toFixed(6)));
