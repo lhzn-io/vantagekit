@@ -35,7 +35,8 @@
 | Action | Keyboard / mouse | Gamepad |
 |---|---|---|
 | Attach the camera to the selected target, or free it | K | X |
-| Next attached view: chase, point of view, orbit | T | D-pad down |
+| Point of view, or back to the last chase or orbit view | T | D-pad right |
+| Chase or orbit (from point of view or free: the last of the two) | C | D-pad down |
 | Previous / next target | [ / ] | LB / RB |
 | Home view | Home | A |
 | Orbit (orbit view) | left drag, wheel | right stick, triggers |

@@ -214,8 +214,10 @@ def _b(*args, **kw) -> Binding:
 DEFAULT_BINDINGS: List[Binding] = [
     _b("attach", "key:K", label="attach the camera to the selected target, or free it"),
     _b("attach", "pad:X"),
-    _b("view_next", "key:T", label="next attached view: chase, point of view, orbit"),
-    _b("view_next", "pad:DPAD_DOWN"),
+    _b("view_pov", "key:T", label="point of view, or back to chase or orbit"),
+    _b("view_pov", "pad:DPAD_RIGHT"),
+    _b("view_switch", "key:C", label="chase or orbit (from point of view: the last of the two)"),
+    _b("view_switch", "pad:DPAD_DOWN"),
     _b("target_prev", "key:LEFT_BRACKET", label="previous target"),
     _b("target_prev", "pad:LEFT_SHOULDER"),
     _b("target_next", "key:RIGHT_BRACKET", label="next target"),

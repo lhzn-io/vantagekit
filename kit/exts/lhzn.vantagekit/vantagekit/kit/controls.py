@@ -64,12 +64,18 @@ class ViewerControls:
         self.router = InputRouter(self.state, order=order, consume=consume, name=name)
         self._handlers: Dict[str, Callable[[], None]] = {
             "attach": self.toggle_attach,
-            "view_next": self.next_view,
+            "view_next": self.next_view,  # every view in turn; not bound by default
+            "view_pov": self.toggle_pov,
+            "view_switch": self.switch_view,
             "target_prev": lambda: self.step_target(-1),
             "target_next": lambda: self.step_target(1),
             "home": self.rig.home,
         }
         self._mode_listeners: List[Callable[[str], None]] = []
+        # The last outside view (chase or orbit): where view_pov returns from point of view and
+        # where view_switch goes from point of view or free
+        outside = [v for v in self.rig.settings.views if v != "pov"]
+        self._last_outside = outside[0] if outside else "chase"
         self._target_listeners: List[Callable[[object], None]] = []
 
     # wiring ---------------------------------------------------------------------
@@ -91,6 +97,8 @@ class ViewerControls:
         before = self.rig.mode
         after = self.rig.set_mode(mode)
         self.state.set_layer("orbit", after == "orbit")
+        if after not in ("free", "pov"):
+            self._last_outside = after
         if after != before:
             for fn in self._mode_listeners:
                 fn(after)
@@ -105,6 +113,25 @@ class ViewerControls:
         views = list(self.rig.settings.views)
         i = views.index(self.rig.mode) if self.rig.mode in views else -1
         return self.set_mode(views[(i + 1) % len(views)])
+
+    def toggle_pov(self) -> str:
+        """Point of view, or from it back to the last chase or orbit view (T, D-pad right)."""
+        if "pov" not in self.rig.settings.views:
+            return self.rig.mode
+        if self.rig.attached and self.rig.mode == "pov":
+            return self.set_mode(self._last_outside)
+        return self.set_mode("pov")
+
+    def switch_view(self) -> str:
+        """Chase or orbit, whichever is not on (C, D-pad down); from point of view or free, the
+        last of the two."""
+        outside = [v for v in self.rig.settings.views if v != "pov"]
+        if not outside:
+            return self.rig.mode
+        if not self.rig.attached or self.rig.mode not in outside:
+            return self.set_mode(self._last_outside if self._last_outside in outside else outside[0])
+        i = outside.index(self.rig.mode)
+        return self.set_mode(outside[(i + 1) % len(outside)])
 
     def step_target(self, direction: int):
         tid = self.rig.step_target(direction)
@@ -145,10 +172,10 @@ class ViewerControls:
 
     _HINTS = {
         "free": "K / X: attach",
-        "chase": "T / D-pad down: next view    Home / A: reset view",
-        "pov": "T / D-pad down: next view",
+        "chase": "C / D-pad down: orbit    T / D-pad right: point of view    Home / A: reset view",
+        "pov": "T / D-pad right: back    C / D-pad down: chase or orbit",
         "orbit": "Right stick, drag: orbit    Triggers, wheel: distance    "
-        "T / D-pad down: chase from here    Home / A: reset",
+        "C / D-pad down: chase from here    T / D-pad right: point of view    Home / A: reset",
     }
 
     def view_badge(self) -> tuple:
