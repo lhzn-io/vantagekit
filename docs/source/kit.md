@@ -98,7 +98,7 @@ as above.
 
 ### Versions
 
-The package version follows the repository's release tags, so `vantagekit==0.8.2` matches the
-JavaScript modules served from `@v0.8.2`.
+The package version follows the repository's release tags, so `vantagekit==0.8.3` matches the
+JavaScript modules served from `@v0.8.3`.
 
 Both modules are described in the {doc}`python-api`.

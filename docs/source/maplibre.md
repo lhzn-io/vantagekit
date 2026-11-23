@@ -3,7 +3,7 @@
 ```html
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script type="module">
-import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.8.2/vantagekit-maplibre.js';
+import { createMapVantage } from 'https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.8.3/vantagekit-maplibre.js';
 
 map.on('load', () => {
   const nav = createMapVantage({ maplibregl, map, fly: { minAltitude: 2 } });

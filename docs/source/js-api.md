@@ -1,7 +1,7 @@
 # JavaScript API
 
 vantagekit is three ES modules at the root of the repository, served for each release tag from
-jsDelivr (`https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.8.2/<module>`):
+jsDelivr (`https://cdn.jsdelivr.net/gh/lhzn-io/vantagekit@v0.8.3/<module>`):
 
 | Module | Contents |
 |---|---|
@@ -527,7 +527,7 @@ The core module has no renderer dependency. The adapters re-export it.
 
 ```{js:data} VERSION
 
-The release version, `'0.8.2'`.
+The release version, `'0.8.3'`.
 ```
 
 ```{js:data} LINK_VERSION
