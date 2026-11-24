@@ -5,6 +5,12 @@ seconds) work on Y-up and Z-up stages in any unit. In free mode it writes nothin
 native navigation moves the camera; in the attached modes it writes one cached
 xformOp:transform per frame and the camera is locked against native navigation
 (NativeNavigation). Mode changes are the only time settings or op order change.
+
+Kit's native navigation dollies and tumbles about the camera's center of interest
+(``omni:kit:centerOfInterest``, in camera space, a distance along -Z) and steps the wheel
+in proportion to that distance. Whenever the rig hands the camera back to it (place(), and
+leaving an attached mode for free) it sets that point to what the camera looks at; a stale
+one made a single wheel click jump hundreds of meters after the camera moved.
 """
 
 from __future__ import annotations
@@ -153,6 +159,8 @@ class CameraRig:
                 self._activate_camera()
             self.view = mode
             self._enter(mode, self.mode)
+        if mode == "free" and self._target.value is not None:
+            self._set_center_of_interest(self._pivot(self._target.value))
         self.mode = mode
         self.native.set_native(mode == "free", stage, self.camera_path)
         carb.log_info(f"[{self.name}] camera mode {mode} (target {self.targets.selected})")
@@ -276,7 +284,30 @@ class CameraRig:
             return False
         if self._op is None or not self._op_valid(prim):
             self._prepare_op(prim)
-        return self._write(look_at_matrix(eye, look, self.refresh_frame().up))
+        ok = self._write(look_at_matrix(eye, look, self.refresh_frame().up))
+        if ok:
+            self._set_center_of_interest(look, eye)
+        return ok
+
+    def _set_center_of_interest(self, look: Sequence[float], eye: Sequence[float] | None = None) -> None:
+        """Kit's native navigation pivots and dollies about this point: the distance to look,
+        along the camera's -Z (stage units)."""
+        eye = eye if eye is not None else self.eye()
+        prim = self._prim()
+        if eye is None or not prim or not prim.IsValid():
+            return
+        d = math.sqrt(sum((float(a) - float(b)) ** 2 for a, b in zip(look, eye)))
+        if not math.isfinite(d) or d <= 0.0:
+            return
+        try:
+            from pxr import Sdf
+
+            attr = prim.GetAttribute("omni:kit:centerOfInterest")
+            if not attr or not attr.IsValid():
+                attr = prim.CreateAttribute("omni:kit:centerOfInterest", Sdf.ValueTypeNames.Vector3d, custom=False)
+            attr.Set(Gf.Vec3d(0.0, 0.0, -d))
+        except Exception as e:
+            carb.log_warn(f"[{self.name}] could not set the center of interest: {e}")
 
     # USD ----------------------------------------------------------------------------
     def _activate_camera(self) -> None:
